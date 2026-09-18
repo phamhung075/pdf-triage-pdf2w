@@ -1,0 +1,26 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "success": true,
+    "message": "Decision updated — it now teaches the AI its new values.",
+    "decision": {
+      "id": 3,
+      "document_id": 1,
+      "checksum": "abc",
+      "original_filename": "x.pdf",
+      "title": "X",
+      "old_category": "invoices",
+      "old_subcategory": "sfr",
+      "new_category": "bank",
+      "new_subcategory": "societe_generale",
+      "user_feedback_reason": "Manual user selection",
+      "raw_text_snippet": "snip",
+      "rule_keywords": [
+        "SG_CODE"
+      ],
+      "enabled": 0,
+      "created_at": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}

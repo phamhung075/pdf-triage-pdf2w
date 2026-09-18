@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "message": "Categories updated successfully",
+    "categories": [
+      {
+        "id": "invoices",
+        "name": "Factures",
+        "description": "",
+        "aliases": [],
+        "subcategories": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "totalDocuments": 5,
+    "categories": [
+      {
+        "id": "invoices",
+        "name": "Factures",
+        "description": "",
+        "aliases": [],
+        "subcategories": [
+          {
+            "id": "sfr",
+            "name": "SFR",
+            "aliases": [],
+            "subcategories": [],
+            "count": 3
+          },
+          {
+            "id": "edf",
+            "name": "Edf",
+            "aliases": [
+              "edf"
+            ],
+            "count": 2
+          }
+        ],
+        "count": 5
+      }
+    ]
+  }
+}

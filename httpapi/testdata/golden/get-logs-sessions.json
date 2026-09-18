@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "total": 1,
+    "sessions": [
+      {
+        "filename": "facture.pdf",
+        "startedAt": "2026-01-15T10:00:00.000Z",
+        "updatedAt": "2026-01-15T10:00:05.000Z",
+        "logsCount": 2,
+        "status": "COMPLETED",
+        "category": "invoices",
+        "subcategory": "sfr",
+        "logs": [
+          {
+            "id": 1,
+            "timestamp": "2026-01-15T10:00:00.000Z",
+            "level": "INFO",
+            "moduleName": "TRIAGE",
+            "message": "start",
+            "meta": {
+              "target": "/tmp/y.pdf"
+            },
+            "line": "line-1\n"
+          }
+        ]
+      }
+    ]
+  }
+}

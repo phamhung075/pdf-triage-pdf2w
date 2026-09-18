@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "'divers' is not a valid subcategory (general/other/divers/year strings are not allowed — Golden Rule #4)."
+  }
+}

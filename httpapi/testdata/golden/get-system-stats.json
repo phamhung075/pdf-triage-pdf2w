@@ -1,0 +1,52 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "raws": {
+      "count": 2,
+      "bytes": 15,
+      "sizeFormatted": "15 B"
+    },
+    "archive": {
+      "count": 0,
+      "bytes": 0,
+      "sizeFormatted": "0 B"
+    },
+    "database": {
+      "bytes": 0,
+      "sizeFormatted": "0 B"
+    },
+    "total": {
+      "count": 2,
+      "bytes": 15,
+      "sizeFormatted": "15 B"
+    },
+    "formatBreakdown": {
+      "pdf": {
+        "count": 1,
+        "bytes": 10,
+        "sizeFormatted": "10 B"
+      },
+      "image": {
+        "count": 1,
+        "bytes": 5,
+        "sizeFormatted": "5 B"
+      },
+      "text": {
+        "count": 0,
+        "bytes": 0,
+        "sizeFormatted": "0 B"
+      },
+      "word": {
+        "count": 0,
+        "bytes": 0,
+        "sizeFormatted": "0 B"
+      },
+      "excel": {
+        "count": 0,
+        "bytes": 0,
+        "sizeFormatted": "0 B"
+      }
+    }
+  }
+}

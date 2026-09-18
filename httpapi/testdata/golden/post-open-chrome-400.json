@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "[\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"undefined\",\n    \"path\": [\n      \"targetPath\"\n    ],\n    \"message\": \"Required\"\n  }\n]"
+  }
+}

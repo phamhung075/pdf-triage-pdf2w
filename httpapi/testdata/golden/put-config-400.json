@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "[\n  {\n    \"code\": \"custom\",\n    \"message\": \"Only 'qwen3.5:9b' is supported (Golden Rule #14) — other models, including cloud/subscription-gated ones, are rejected.\",\n    \"path\": [\n      \"ollama_model\"\n    ]\n  }\n]"
+  }
+}

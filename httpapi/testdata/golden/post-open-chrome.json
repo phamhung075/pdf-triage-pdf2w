@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "success": true,
+    "message": "Opened document in Chrome tab",
+    "path": "/tmp/golden-eKMQ3G/doc.pdf"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "logs": [
+      {
+        "id": 1,
+        "timestamp": "2026-01-15T10:00:00.000Z",
+        "level": "INFO",
+        "moduleName": "TEST",
+        "message": "hello",
+        "meta": {
+          "target": "/tmp/x.pdf"
+        },
+        "line": "[2026-01-15T10:00:00.000Z] [INFO] [TEST] hello | Meta: {\"target\":\"/tmp/x.pdf\"}\n"
+      }
+    ]
+  }
+}

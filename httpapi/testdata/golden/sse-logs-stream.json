@@ -1,0 +1,3 @@
+{
+  "chunks": "data: {\"type\":\"INIT\",\"logs\":[{\"id\":1,\"timestamp\":\"2026-01-15T10:00:00.000Z\",\"level\":\"INFO\",\"moduleName\":\"TEST\",\"message\":\"init\",\"meta\":null,\"line\":\"init\\n\"}]}\n\ndata: {\"type\":\"LOG\",\"entry\":{\"id\":2,\"timestamp\":\"2026-01-15T10:00:01.000Z\",\"level\":\"WARN\",\"moduleName\":\"TEST\",\"message\":\"tick\",\"filename\":\"a.pdf\",\"meta\":null,\"line\":\"tick\\n\"}}\n\n"
+}

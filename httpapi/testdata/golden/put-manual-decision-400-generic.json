@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "A decision needs a concrete target category — general/other/divers are not allowed."
+  }
+}

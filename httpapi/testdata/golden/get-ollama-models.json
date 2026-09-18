@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "online": true,
+    "models": [
+      "qwen3.5:9b",
+      "nomic-embed-text"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "language": "fr",
+    "input_dir": "/tmp/raws-missing",
+    "output_root_dir": "/tmp/archive-missing",
+    "ollama_model": "qwen3.5:9b",
+    "ollama_host": "http://127.0.0.1:1",
+    "personal_name_denylist": [
+      "secret"
+    ]
+  }
+}

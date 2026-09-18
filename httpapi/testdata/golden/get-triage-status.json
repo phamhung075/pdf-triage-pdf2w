@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "isRunning": false,
+    "type": "IDLE",
+    "totalFiles": 0,
+    "processedFiles": 0,
+    "percent": 0,
+    "currentFile": "",
+    "stage": "",
+    "message": "System idle",
+    "startedAt": null,
+    "result": null,
+    "error": null
+  }
+}

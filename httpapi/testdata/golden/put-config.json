@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "message": "System settings updated successfully",
+    "config": {
+      "language": "fr",
+      "input_dir": "/tmp/raws",
+      "output_root_dir": "/tmp/archive",
+      "ollama_model": "qwen3.5:9b",
+      "ollama_host": "http://127.0.0.1:11434",
+      "personal_name_denylist": [
+        "secret"
+      ]
+    }
+  }
+}
