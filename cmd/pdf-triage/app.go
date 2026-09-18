@@ -292,12 +292,13 @@ func newApplication(opts appOptions) (*application, error) {
 	handler := httpapi.NewServer(httpDeps)
 
 	// --- auto-watcher -------------------------------------------------------------------------
-	// REPORTED GAP (doc.go): httpapi exposes no accessor for the server-owned *Hub, so the watcher
-	// cannot broadcast its raw SCAN_*/FILE_* events to the same SSE clients. TASK_* still reaches
-	// the real hub through the shared taskstate.Manager broadcaster installed by the route groups.
+	// The server owns the SSE hub that GET /api/triage/events subscribes to. Sharing it with the
+	// watcher (Server.Hub) makes an AUTO-scan's raw SCAN_*/FILE_* frames reach the same dashboard
+	// clients as a manual scan; TASK_* already arrives through the shared taskstate.Manager
+	// broadcaster installed by the route groups.
 	var hub *httpapi.Hub
-	if captured == nil {
-		hub = httpapi.NewHub()
+	if captured != nil {
+		hub = captured.Hub()
 	}
 	watcher := httpapi.NewWatcher(httpapi.WatcherDeps{
 		Gate:     captured,
