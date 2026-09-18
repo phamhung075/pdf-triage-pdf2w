@@ -1,0 +1,26 @@
+{
+  "doc": {
+    "kind": "box",
+    "box": {
+      "x": 80,
+      "y": 60,
+      "width": 240,
+      "height": 180
+    }
+  },
+  "doc_big": {
+    "kind": "box",
+    "box": {
+      "x": 239,
+      "y": 180,
+      "width": 722,
+      "height": 541
+    }
+  },
+  "uniform": {
+    "kind": "no-signal"
+  },
+  "fills_frame": {
+    "kind": "vetoed"
+  }
+}
