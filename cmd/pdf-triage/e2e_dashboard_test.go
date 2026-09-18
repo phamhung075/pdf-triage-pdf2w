@@ -17,9 +17,9 @@ import (
 // 2. Core API routes (/api/config, /api/categories, /api/documents) return 200 OK with valid JSON.
 // 3. The SSE event stream (/api/triage/events) connects with text/event-stream.
 func TestE2EDashboardAndAPI(t *testing.T) {
-	app, ok := newStartupApplication()
-	if !ok {
-		t.Fatalf("failed to initialize application")
+	app, err := newApplication(appOptions{DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("failed to initialize application: %v", err)
 	}
 	defer app.Close()
 
