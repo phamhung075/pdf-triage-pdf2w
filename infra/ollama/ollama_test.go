@@ -541,3 +541,86 @@ func TestIsOllamaDownError(t *testing.T) {
 		}
 	}
 }
+
+// Added case (no TS test): ListModels returns the model names from GET /api/tags in order, using an
+// explicit host that differs from the client's configured base URL.
+func TestListModelsReturnsNamesInOrder(t *testing.T) {
+	cap := &capturedOllama{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cap.record(r)
+		writeJSON(w, http.StatusOK, `{"models":[{"name":"qwen3.5:9b"},{"name":"nomic-embed-text"},{"name":"llama3:latest"}]}`)
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(t, "http://127.0.0.1:1").ListModels(srv.URL)
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	want := []string{"qwen3.5:9b", "nomic-embed-text", "llama3:latest"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ListModels = %#v, want %#v", got, want)
+	}
+	if n := cap.countPath("/api/tags"); n != 1 {
+		t.Errorf("tags called %d times, want 1", n)
+	}
+}
+
+// Added case (no TS test): an empty host targets the client's configured base URL (the TS
+// `new Ollama({ host: host || CONFIG.OLLAMA_HOST })` fallback).
+func TestListModelsEmptyHostUsesConfiguredBaseURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			writeJSON(w, http.StatusNotFound, `{"error":"not found"}`)
+			return
+		}
+		writeJSON(w, http.StatusOK, `{"models":[{"name":"configured-model"}]}`)
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(t, srv.URL).ListModels("")
+	if err != nil {
+		t.Fatalf("ListModels returned error: %v", err)
+	}
+	if want := []string{"configured-model"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ListModels = %#v, want %#v", got, want)
+	}
+}
+
+// Added case (no TS test): a reachable non-2xx response is returned unchanged, exactly like the
+// generate wrappers' "reachable model rejected the request" path.
+func TestListModelsReturnsErrorOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusInternalServerError, `{"error":"boom"}`)
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv.URL).ListModels("")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var down *OllamaUnavailableError
+	if errors.As(err, &down) {
+		t.Fatalf("reachable non-2xx error was classified as Ollama-down: %v", err)
+	}
+	if err.Error() != "boom" {
+		t.Errorf("err = %q, want %q", err.Error(), "boom")
+	}
+}
+
+// Added case (no TS test): a connection-level failure becomes an *OllamaUnavailableError, the same
+// classification the generate wrappers use.
+func TestListModelsWrapsConnectionFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+
+	c := New(Config{BaseURL: url, Timeout: 2 * time.Second, Model: "qwen3.5:9b"})
+	_, err := c.ListModels("")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	var down *OllamaUnavailableError
+	if !errors.As(err, &down) {
+		t.Fatalf("error type = %T, want *OllamaUnavailableError: %v", err, err)
+	}
+}

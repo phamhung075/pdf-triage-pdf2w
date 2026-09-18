@@ -467,9 +467,36 @@ func (c *Client) asOllamaUnavailable(err error) error {
 	return err
 }
 
+// ListModels returns the model names from GET {host}/api/tags, in the order Ollama reports them.
+// An empty host uses the client's configured base URL. It mirrors the TS web-server's
+// `new Ollama({ host: host || CONFIG.OLLAMA_HOST }).list()` used by /api/ollama/models and
+// /api/ollama/status (web-server.ts:184-225): a transport failure is classified as an
+// OllamaUnavailableError exactly like the generate wrappers, while a reachable non-2xx error is
+// returned unchanged.
+func (c *Client) ListModels(host string) ([]string, error) {
+	base := c.baseURL()
+	if host != "" {
+		base = strings.TrimRight(host, "/")
+	}
+	models, err := c.listFrom(base)
+	if err != nil {
+		return nil, c.asOllamaUnavailable(err)
+	}
+	names := make([]string, 0, len(models))
+	for _, m := range models {
+		names = append(names, m.Name)
+	}
+	return names, nil
+}
+
 func (c *Client) list() ([]modelInfo, error) {
+	return c.listFrom(c.baseURL())
+}
+
+// listFrom is list() against an explicit base URL, so ListModels can target another host.
+func (c *Client) listFrom(base string) ([]modelInfo, error) {
 	var resp tagsResponse
-	if err := c.getJSON("/api/tags", &resp); err != nil {
+	if err := c.getJSON(base, "/api/tags", &resp); err != nil {
 		return nil, err
 	}
 	return resp.Models, nil
@@ -502,8 +529,8 @@ func (c *Client) postJSON(path string, payload any, out any) error {
 	return c.do(req, out)
 }
 
-func (c *Client) getJSON(path string, out any) error {
-	req, err := http.NewRequest(http.MethodGet, c.baseURL()+path, nil)
+func (c *Client) getJSON(base, path string, out any) error {
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
 	if err != nil {
 		return err
 	}
