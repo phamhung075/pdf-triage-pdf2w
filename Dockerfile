@@ -1,12 +1,12 @@
 FROM golang:1.23-alpine AS build
 WORKDIR /app
-COPY go.mod ./
-COPY canonicalpath/ ./canonicalpath/
-COPY cleantext/ ./cleantext/
-COPY cmd/ ./cmd/
-RUN go build -o /pdf-triage-pdf2w ./cmd/server
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -o /pdf-triage ./cmd/pdf-triage
 
 FROM alpine:3.19
-COPY --from=build /pdf-triage-pdf2w /pdf-triage-pdf2w
-EXPOSE 3985
-ENTRYPOINT ["/pdf-triage-pdf2w"]
+COPY --from=build /pdf-triage /pdf-triage
+EXPOSE 3971
+ENTRYPOINT ["/pdf-triage"]
+CMD ["serve"]

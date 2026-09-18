@@ -82,16 +82,6 @@ database first, run with empty temporary input/output dirs, and never bind a fix
 report in the pdf-triage repo at
 `docs/superpowers/specs/2026-09-18-cutover-differential-report.md`.
 
-## Run
-
-Obsolete at cutover: this older canonical-path helper service is superseded by `cmd/pdf-triage`; the
-command below is kept only as a historical reference.
-
-```sh
-go run ./cmd/server        # listens on :3985 (PORT env var to override)
-curl http://127.0.0.1:3985/health
-```
-
 ## Test
 
 ```sh
