@@ -368,7 +368,7 @@ func (a *application) Close() {
 // logf writes a startup/lifecycle line to stderr, preserving the console.error destinations the TS
 // startup path used.
 func (a *application) logf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	fmt.Fprintf(os.Stdout, format+"\n", args...)
 }
 
 // serve runs the HTTP server plus the auto-watcher until ctx is cancelled, then stops the watcher.

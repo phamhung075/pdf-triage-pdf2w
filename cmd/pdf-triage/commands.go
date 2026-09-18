@@ -47,14 +47,14 @@ func runServeCommand() int {
 	ctx, stop := signalContext()
 	defer stop()
 
-	// Banner lines preserved verbatim from src/index.ts:20 and web-server.ts:1572 (the latter is
-	// printed by httpapi.Start once the listener is bound).
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+	// Banner lines preserved from src/index.ts:20 and web-server.ts:1572.
 	fmt.Fprintln(os.Stdout, "Starting Web Dashboard & Triage API Server...")
 	if app.firstRun {
 		fmt.Fprintln(os.Stdout, "First run detected: no incoming/archive folders are configured yet — open the dashboard to finish setup.")
 	}
+	fmt.Fprintf(os.Stdout, "Dashboard URL: http://%s\n", addr)
 
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	if err := app.serve(ctx, addr, httpapi.StartOptions{}); err != nil {
 		fmt.Fprintf(os.Stderr, "Fatal error in application: %v\n", err)
 		return 1
