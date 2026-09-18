@@ -441,13 +441,36 @@ func loadDotEnv(path string) map[string]string {
 }
 
 func resolveBaseDir(explicit string, env *envSource) string {
+	candidate := ""
 	if v := env.value("PDF_TRIAGE_BASE_DIR"); v != "" {
-		return resolveDir(v)
+		candidate = resolveDir(v)
+	} else if explicit != "" {
+		candidate = resolveDir(explicit)
+	} else {
+		candidate = executableDir()
 	}
-	if explicit != "" {
-		return resolveDir(explicit)
+	dir := candidate
+	for {
+		if hasAssetRoot(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
-	return executableDir()
+	return candidate
+}
+
+func hasAssetRoot(dir string) bool {
+	if info, err := os.Stat(filepath.Join(dir, "public")); err == nil && info.IsDir() {
+		return true
+	}
+	if info, err := os.Stat(filepath.Join(dir, "categories.json")); err == nil && !info.IsDir() {
+		return true
+	}
+	return false
 }
 
 func resolveDataDir(explicit, baseDir string, env *envSource) string {

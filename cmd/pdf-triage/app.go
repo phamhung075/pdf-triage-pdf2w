@@ -87,10 +87,30 @@ type application struct {
 // It checks explicit, PDF_TRIAGE_BASE_DIR, working directory, and parent directories.
 func findBaseDir(explicit string) string {
 	if explicit != "" {
-		return explicit
+		dir := explicit
+		for {
+			if hasPublicDir(dir) {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	if v := os.Getenv("PDF_TRIAGE_BASE_DIR"); v != "" {
-		return v
+		dir := v
+		for {
+			if hasPublicDir(dir) {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	wd, err := os.Getwd()
 	if err != nil {
