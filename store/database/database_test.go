@@ -660,3 +660,234 @@ func TestWarnFTSWriteFailureLoggedOncePerProcess(t *testing.T) {
 		t.Errorf("warned %d times, want exactly 1 per process", calls)
 	}
 }
+
+// --- added: manual_decisions CRUD (raw SQL moved here from store/manualdecisions) ---
+//
+// These methods are the store/database half of the manual_decisions statements that lived in
+// src/infrastructure/manual-decisions-store.ts (:119-124 insert, :197 list, :236 select-by-id,
+// :247-252 update, :288 delete, :312 clear). store/manualdecisions still owns the TS-matching
+// normalization and the JSON mirror; this layer owns the SQL and the row shape.
+
+func sampleDecision() ManualDecisionInsert {
+	return ManualDecisionInsert{
+		DocumentID:         42,
+		Checksum:           "abc123checksum",
+		OriginalFilename:   "RLV_CHQ_001.pdf",
+		Title:              "Relevé de chèques BNP",
+		OldCategory:        "housing",
+		OldSubcategory:     "northwind_realty",
+		NewCategory:        "administrative",
+		NewSubcategory:     "bnp_paribas",
+		UserFeedbackReason: "This is a BNP check statement, not Northwind Realty rent",
+		RawTextSnippet:     "BNP PARIBAS RELEVE DE CHEQUES",
+		RuleKeywords:       []string{"rlv", "chq", "bnp"},
+		Enabled:            1,
+		CreatedAt:          "2026-01-15T00:00:00.000Z",
+	}
+}
+
+func TestInsertAndGetManualDecision(t *testing.T) {
+	s := newTestStore(t)
+	id, err := s.InsertManualDecision(sampleDecision())
+	if err != nil {
+		t.Fatalf("InsertManualDecision: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("InsertManualDecision returned id 0")
+	}
+
+	got, err := s.GetManualDecision(id)
+	if err != nil || got == nil {
+		t.Fatalf("GetManualDecision: %v / %v", got, err)
+	}
+	if got.ID != id {
+		t.Errorf("id = %d, want %d", got.ID, id)
+	}
+	if got.DocumentID != 42 {
+		t.Errorf("document_id = %d, want 42", got.DocumentID)
+	}
+	if got.Checksum != "abc123checksum" || got.OriginalFilename != "RLV_CHQ_001.pdf" {
+		t.Errorf("identity fields = %+v", got)
+	}
+	if got.Title != "Relevé de chèques BNP" {
+		t.Errorf("title = %q", got.Title)
+	}
+	if got.OldCategory != "housing" || got.OldSubcategory != "northwind_realty" {
+		t.Errorf("old = %q/%q", got.OldCategory, got.OldSubcategory)
+	}
+	if got.NewCategory != "administrative" || got.NewSubcategory != "bnp_paribas" {
+		t.Errorf("new = %q/%q", got.NewCategory, got.NewSubcategory)
+	}
+	if got.UserFeedbackReason != "This is a BNP check statement, not Northwind Realty rent" {
+		t.Errorf("reason = %q", got.UserFeedbackReason)
+	}
+	if got.RawTextSnippet != "BNP PARIBAS RELEVE DE CHEQUES" {
+		t.Errorf("snippet = %q", got.RawTextSnippet)
+	}
+	// rule_keywords is stored as JSON array text, exactly as the TS JSON.stringify wrote it.
+	if got.RuleKeywords != `["rlv","chq","bnp"]` {
+		t.Errorf("rule_keywords = %q", got.RuleKeywords)
+	}
+	if !got.Enabled.Valid || got.Enabled.Int64 != 1 {
+		t.Errorf("enabled = %+v, want 1", got.Enabled)
+	}
+	if got.CreatedAt != "2026-01-15T00:00:00.000Z" {
+		t.Errorf("created_at = %q", got.CreatedAt)
+	}
+}
+
+func TestInsertManualDecisionDefaultsRuleKeywordsToEmptyArray(t *testing.T) {
+	// The column default is '[]' (database.ts:134-151); a nil keyword list must be stored as []
+	// rather than JSON null so a later read normalizes to an empty list, not a string "null".
+	s := newTestStore(t)
+	rec := sampleDecision()
+	rec.RuleKeywords = nil
+	rec.Enabled = 0
+	id, err := s.InsertManualDecision(rec)
+	if err != nil {
+		t.Fatalf("InsertManualDecision: %v", err)
+	}
+	got, _ := s.GetManualDecision(id)
+	if got.RuleKeywords != "[]" {
+		t.Errorf("rule_keywords = %q, want []", got.RuleKeywords)
+	}
+	if !got.Enabled.Valid || got.Enabled.Int64 != 0 {
+		t.Errorf("enabled = %+v, want 0", got.Enabled)
+	}
+}
+
+func TestGetManualDecisionMissingReturnsNil(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetManualDecision(9999)
+	if err != nil {
+		t.Fatalf("GetManualDecision: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("got %+v, want nil", got)
+	}
+}
+
+func TestListManualDecisionsNewestFirst(t *testing.T) {
+	s := newTestStore(t)
+	empty, err := s.ListManualDecisions()
+	if err != nil {
+		t.Fatalf("ListManualDecisions: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty list = %v, want non-nil empty", empty)
+	}
+
+	first := sampleDecision()
+	id1, _ := s.InsertManualDecision(first)
+	second := sampleDecision()
+	second.Checksum = "second"
+	second.OriginalFilename = "second.pdf"
+	id2, _ := s.InsertManualDecision(second)
+
+	all, err := s.ListManualDecisions()
+	if err != nil {
+		t.Fatalf("ListManualDecisions: %v", err)
+	}
+	if len(all) != 2 || all[0].ID != id2 || all[1].ID != id1 {
+		t.Fatalf("order = %+v, want ids [%d %d]", all, id2, id1)
+	}
+}
+
+func TestUpdateManualDecisionRow(t *testing.T) {
+	s := newTestStore(t)
+	id, _ := s.InsertManualDecision(sampleDecision())
+
+	err := s.UpdateManualDecisionRow(id, ManualDecisionUpdate{
+		NewCategory:        "bank",
+		NewSubcategory:     "societe_generale",
+		UserFeedbackReason: "Actually Société Générale",
+		RuleKeywords:       []string{"SG_CODE"},
+		Enabled:            0,
+	})
+	if err != nil {
+		t.Fatalf("UpdateManualDecisionRow: %v", err)
+	}
+
+	got, _ := s.GetManualDecision(id)
+	if got.NewCategory != "bank" || got.NewSubcategory != "societe_generale" {
+		t.Errorf("new = %q/%q", got.NewCategory, got.NewSubcategory)
+	}
+	if got.UserFeedbackReason != "Actually Société Générale" {
+		t.Errorf("reason = %q", got.UserFeedbackReason)
+	}
+	if got.RuleKeywords != `["SG_CODE"]` {
+		t.Errorf("rule_keywords = %q", got.RuleKeywords)
+	}
+	if !got.Enabled.Valid || got.Enabled.Int64 != 0 {
+		t.Errorf("enabled = %+v, want 0", got.Enabled)
+	}
+	// The untouched identity columns survive the update.
+	if got.DocumentID != 42 || got.Checksum != "abc123checksum" || got.Title != "Relevé de chèques BNP" {
+		t.Errorf("identity columns changed: %+v", got)
+	}
+}
+
+func TestUpdateManualDecisionRowMissingIDIsNoOp(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.UpdateManualDecisionRow(9999, ManualDecisionUpdate{NewCategory: "x"}); err != nil {
+		t.Fatalf("UpdateManualDecisionRow(missing): %v", err)
+	}
+}
+
+func TestDeleteManualDecisionRow(t *testing.T) {
+	s := newTestStore(t)
+	id, _ := s.InsertManualDecision(sampleDecision())
+	if err := s.DeleteManualDecisionRow(id); err != nil {
+		t.Fatalf("DeleteManualDecisionRow: %v", err)
+	}
+	if got, _ := s.GetManualDecision(id); got != nil {
+		t.Errorf("row %d still present", id)
+	}
+	// Deleting a missing id is a silent no-op, the same as the TS db.run.
+	if err := s.DeleteManualDecisionRow(id); err != nil {
+		t.Fatalf("DeleteManualDecisionRow(missing): %v", err)
+	}
+}
+
+func TestClearManualDecisions(t *testing.T) {
+	s := newTestStore(t)
+	_, _ = s.InsertManualDecision(sampleDecision())
+	second := sampleDecision()
+	second.Checksum = "second"
+	_, _ = s.InsertManualDecision(second)
+
+	if err := s.ClearManualDecisions(); err != nil {
+		t.Fatalf("ClearManualDecisions: %v", err)
+	}
+	all, _ := s.ListManualDecisions()
+	if len(all) != 0 {
+		t.Errorf("rows after clear = %d, want 0", len(all))
+	}
+}
+
+func TestManualDecisionNullColumnsPreserved(t *testing.T) {
+	// The table's manual_decisions columns are all nullable except the autoincrement id. A legacy
+	// row can hold SQL NULL in document_id / rule_keywords / enabled; the row decoder must surface
+	// zero values for the text/number columns and keep enabled NULL distinguishable (Valid == false)
+	// so store/manualdecisions can normalise it to active, matching TS.
+	s := newTestStore(t)
+	if _, err := s.db.Exec(
+		`INSERT INTO manual_decisions (document_id, rule_keywords, enabled, created_at)
+         VALUES (NULL, NULL, NULL, 'legacy')`,
+	); err != nil {
+		t.Fatalf("insert NULL row: %v", err)
+	}
+	got, err := s.GetManualDecision(1)
+	if err != nil || got == nil {
+		t.Fatalf("GetManualDecision: %v / %v", got, err)
+	}
+	if got.DocumentID != 0 {
+		t.Errorf("document_id = %d, want 0", got.DocumentID)
+	}
+	if got.Checksum != "" || got.RuleKeywords != "" {
+		t.Errorf("NULL text columns = %q/%q, want empty", got.Checksum, got.RuleKeywords)
+	}
+	if got.Enabled.Valid {
+		t.Errorf("enabled = %+v, want invalid (NULL)", got.Enabled)
+	}
+}

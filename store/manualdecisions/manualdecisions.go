@@ -18,17 +18,11 @@
 // clearManualDecisions (:310). deriveRuleKeywords (:6) was already ported as
 // decisionrule.DeriveRuleKeywords and is reused rather than duplicated.
 //
-// Database dependency (GAP for the orchestrator). store/database owns the schema and the
-// manual_decisions table (store/database/database.go:192-209) but exposes NO manual-decision CRUD
-// and no accessor for its *sql.DB, so this package cannot call it directly. It therefore declares
-// the narrow DecisionDB interface below — exactly the database surface it needs — and runs its own
-// parameterised SQL against that interface. *sql.DB satisfies it, so the tests create the schema
-// with store/database.Open and then open their own handle on the same temp file. For the
-// orchestrator: either add Exec/Query/QueryRow passthroughs (or a DB() *sql.DB accessor) to
-// store/database.Store so it satisfies DecisionDB, or move the six SQL statements into semantic
-// methods (InsertManualDecision, GetManualDecision, ListManualDecisions, UpdateManualDecisionRow,
-// DeleteManualDecisionRow, ClearManualDecisions) and re-point this package at them. Either way no
-// caller should need a second handle.
+// Database dependency. store/database owns the schema and the manual_decisions table, and exposes
+// its CRUD as the semantic methods InsertManualDecision, GetManualDecision, ListManualDecisions,
+// UpdateManualDecisionRow, DeleteManualDecisionRow and ClearManualDecisions. This package depends on
+// the narrow DecisionStore interface below (satisfied by *database.Store) and carries no raw SQL for
+// that table (design rule: raw SQL lives ONLY in store/database).
 //
 // Semantic gaps, all resolved to MATCH TS:
 //
@@ -50,9 +44,9 @@
 //  6. `new Date().toISOString()` always renders exactly three fractional digits; Go's
 //     time.RFC3339Nano trims trailing zeros, so created_at is formatted explicitly as
 //     "2006-01-02T15:04:05.000Z" in UTC.
-//  7. `SELECT *` column order. TS maps rows to a named object; Go scans positionally, so every
-//     query names its columns explicitly in the CREATE TABLE order instead of using `*` (the same
-//     reason recorded in store/database's package comment, semantic gap 1).
+//  7. Column order. Row scanning moved to store/database's manual-decision methods, which name the
+//     columns explicitly for the positional-scan reason documented there (semantic gap 1); this
+//     package now consumes typed rows.
 //  8. Unknown/legacy keys in a mirror record. TS's object spread preserved keys it did not know
 //     about when rewriting the mirror; this port decodes into the typed Record, so unknown keys are
 //     dropped on rewrite. No current writer produces them.
@@ -85,6 +79,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/phamhung075/pdf-triage-pdf2w/decisionrule"
+	"github.com/phamhung075/pdf-triage-pdf2w/store/database"
 )
 
 // jsISOLayout is Date.toISOString(): always three fractional digits and a literal Z.
@@ -93,37 +88,15 @@ const jsISOLayout = "2006-01-02T15:04:05.000Z"
 // maxRawTextSnippet is the `substring(0, 500)` cap recordManualDecision applies.
 const maxRawTextSnippet = 500
 
-// SQL. store/database owns the schema; these statements are the manual_decisions operations the
-// migration inventory attributes to manual-decisions-store.ts. Every list is explicit for the same
-// positional-scan reason as store/database.
-const (
-	insertDecisionSQL = `INSERT INTO manual_decisions (
-        document_id, checksum, original_filename, title,
-        old_category, old_subcategory, new_category, new_subcategory,
-        user_feedback_reason, raw_text_snippet, rule_keywords, enabled, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	decisionColumnNames = "id, document_id, checksum, original_filename, title, old_category, " +
-		"old_subcategory, new_category, new_subcategory, user_feedback_reason, raw_text_snippet, " +
-		"rule_keywords, enabled, created_at"
-
-	selectDecisionsSQL  = "SELECT " + decisionColumnNames + " FROM manual_decisions ORDER BY id DESC"
-	selectDecisionBySQL = "SELECT " + decisionColumnNames + " FROM manual_decisions WHERE id = ?"
-
-	updateDecisionSQL = `UPDATE manual_decisions SET
-        new_category = ?, new_subcategory = ?, user_feedback_reason = ?, rule_keywords = ?, enabled = ?
-      WHERE id = ?`
-
-	deleteDecisionSQL = "DELETE FROM manual_decisions WHERE id = ?"
-	clearDecisionsSQL = "DELETE FROM manual_decisions"
-)
-
-// DecisionDB is the narrow database surface this package needs from store/database. See the GAP
-// note in the package comment: *sql.DB satisfies it today; store/database.Store does not yet.
-type DecisionDB interface {
-	Exec(query string, args ...any) (sql.Result, error)
-	Query(query string, args ...any) (*sql.Rows, error)
-	QueryRow(query string, args ...any) *sql.Row
+// DecisionStore is the narrow store/database surface this package needs, satisfied by
+// *database.Store. Raw SQL for manual_decisions lives only in store/database.
+type DecisionStore interface {
+	InsertManualDecision(rec database.ManualDecisionInsert) (int64, error)
+	GetManualDecision(id int64) (*database.ManualDecisionRecord, error)
+	ListManualDecisions() ([]database.ManualDecisionRecord, error)
+	UpdateManualDecisionRow(id int64, upd database.ManualDecisionUpdate) error
+	DeleteManualDecisionRow(id int64) error
+	ClearManualDecisions() error
 }
 
 // Logger is the narrow logging surface this package uses (TS's logger.error / logger.info with the
@@ -184,7 +157,7 @@ type Options struct {
 
 // Store owns the database handle, the mirror path and the mtime cache. Build it with New.
 type Store struct {
-	db            DecisionDB
+	db            DecisionStore
 	decisionsFile string
 	logger        Logger
 	now           func() time.Time
@@ -199,7 +172,7 @@ type syncCacheEntry struct {
 }
 
 // New constructs a Store over db with the given options.
-func New(db DecisionDB, opts Options) *Store {
+func New(db DecisionStore, opts Options) *Store {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -455,26 +428,25 @@ func (s *Store) RecordManualDecision(record Record) {
 
 	// 1. Insert into SQLite Database
 	var decisionID int64
-	res, err := s.db.Exec(
-		insertDecisionSQL,
-		record.DocumentID,
-		record.Checksum,
-		record.OriginalFilename,
-		record.Title,
-		record.OldCategory,
-		record.OldSubcategory,
-		record.NewCategory,
-		record.NewSubcategory,
-		record.UserFeedbackReason,
-		rawSnippet,
-		mustJSON(ruleKeywords),
-		enabled,
-		createdAt,
-	)
+	id, err := s.db.InsertManualDecision(database.ManualDecisionInsert{
+		DocumentID:         record.DocumentID,
+		Checksum:           record.Checksum,
+		OriginalFilename:   record.OriginalFilename,
+		Title:              record.Title,
+		OldCategory:        record.OldCategory,
+		OldSubcategory:     record.OldSubcategory,
+		NewCategory:        record.NewCategory,
+		NewSubcategory:     record.NewSubcategory,
+		UserFeedbackReason: record.UserFeedbackReason,
+		RawTextSnippet:     rawSnippet,
+		RuleKeywords:       ruleKeywords,
+		Enabled:            enabled,
+		CreatedAt:          createdAt,
+	})
 	inserted := err == nil
 	if err != nil {
 		s.logger.Error("DECISION_REGISTRY", "Failed to insert manual decision into DB:", err)
-	} else if id, idErr := res.LastInsertId(); idErr == nil {
+	} else {
 		decisionID = id
 	}
 	if inserted {
@@ -562,15 +534,13 @@ func (s *Store) ReadManualDecisionsSync() []Record {
 // GetManualDecisions ports getManualDecisions (manual-decisions-store.ts:194-203). It does not
 // throw: a database failure falls back to the JSON mirror (already newest-first).
 func (s *Store) GetManualDecisions() []Record {
-	rows, err := s.db.Query(selectDecisionsSQL)
+	rows, err := s.db.ListManualDecisions()
 	if err != nil {
 		return s.ReadManualDecisionsSync()
 	}
-	defer rows.Close()
-
-	records, err := scanDecisionList(rows)
-	if err != nil {
-		return s.ReadManualDecisionsSync()
+	records := make([]Record, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, recordFromRow(row))
 	}
 	return records
 }
@@ -622,10 +592,13 @@ func (s *Store) UpdateManualDecision(id int64, patch Patch) (*Record, error) {
 		}
 	}
 
-	if _, err := s.db.Exec(
-		updateDecisionSQL,
-		newCategory, newSubcategory, reason, mustJSON(ruleKeywords), enabled, id,
-	); err != nil {
+	if err := s.db.UpdateManualDecisionRow(id, database.ManualDecisionUpdate{
+		NewCategory:        newCategory,
+		NewSubcategory:     newSubcategory,
+		UserFeedbackReason: reason,
+		RuleKeywords:       ruleKeywords,
+		Enabled:            enabled,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -666,7 +639,7 @@ func (s *Store) DeleteManualDecision(id int64) (bool, error) {
 		return false, nil
 	}
 
-	if _, err := s.db.Exec(deleteDecisionSQL, id); err != nil {
+	if err := s.db.DeleteManualDecisionRow(id); err != nil {
 		return false, err
 	}
 
@@ -694,7 +667,7 @@ func (s *Store) DeleteManualDecision(id int64) (bool, error) {
 // every decision from BOTH stores (Settings → Human Decisions → Delete All). The DB delete is
 // authoritative and returns its error; the mirror rewrite is best-effort.
 func (s *Store) ClearManualDecisions() error {
-	if _, err := s.db.Exec(clearDecisionsSQL); err != nil {
+	if err := s.db.ClearManualDecisions(); err != nil {
 		return err
 	}
 	s.writeJSONFile([]Record{})
@@ -704,71 +677,41 @@ func (s *Store) ClearManualDecisions() error {
 	return nil
 }
 
-// getDecision is `db.get('SELECT * FROM manual_decisions WHERE id = ?')`. nil means no row.
+// getDecision is `db.get(...)`: nil means no row. Row scanning lives in store/database; this helper
+// only converts the typed row for the callers here.
 func (s *Store) getDecision(id int64) (*Record, error) {
-	row := s.db.QueryRow(selectDecisionBySQL, id)
-	rec, err := scanDecision(row.Scan)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	row, err := s.db.GetManualDecision(id)
 	if err != nil {
 		return nil, err
 	}
+	if row == nil {
+		return nil, nil
+	}
+	rec := recordFromRow(*row)
 	return &rec, nil
 }
 
-func scanDecisionList(rows *sql.Rows) ([]Record, error) {
-	records := []Record{}
-	for rows.Next() {
-		rec, err := scanDecision(rows.Scan)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, rec)
-	}
-	return records, rows.Err()
-}
-
-// scanDecision reads one row in decisionColumnNames order and normalizes it. go vet accepts
-// rows.Scan / row.Scan because both are func(dest ...any) error.
-func scanDecision(scan func(dest ...any) error) (Record, error) {
-	var (
-		id                                                          int64
-		documentID                                                  sql.NullInt64
-		checksum, originalFilename, title                           sql.NullString
-		oldCategory, oldSubcategory, newCategory, newSubcategory    sql.NullString
-		userFeedbackReason, rawTextSnippet, ruleKeywords, createdAt sql.NullString
-		enabled                                                     sql.NullInt64
-	)
-	if err := scan(
-		&id, &documentID, &checksum, &originalFilename, &title,
-		&oldCategory, &oldSubcategory, &newCategory, &newSubcategory,
-		&userFeedbackReason, &rawTextSnippet, &ruleKeywords, &enabled, &createdAt,
-	); err != nil {
-		return Record{}, err
-	}
-
-	var ruleKeywordsValue any
-	if ruleKeywords.Valid {
-		ruleKeywordsValue = ruleKeywords.String
-	}
-
+// recordFromRow converts a store/database manual_decisions row to this package's Record, applying
+// the normalization TS's normalizeDecisionRecord did: rule_keywords TEXT becomes a string list (JSON
+// array, or the comma-separated fallback on a parse error) and enabled becomes 1 unless the raw
+// SQLite value is exactly 0 (NULL is active). See semantic gap 1.
+func recordFromRow(row database.ManualDecisionRecord) Record {
 	return Record{
-		ID:                 id,
-		DocumentID:         documentID.Int64,
-		Checksum:           checksum.String,
-		OriginalFilename:   originalFilename.String,
-		Title:              title.String,
-		OldCategory:        oldCategory.String,
-		OldSubcategory:     oldSubcategory.String,
-		NewCategory:        newCategory.String,
-		NewSubcategory:     newSubcategory.String,
-		UserFeedbackReason: userFeedbackReason.String,
-		RawTextSnippet:     rawTextSnippet.String,
-		RuleKeywords:       normalizeRuleKeywords(ruleKeywordsValue),
-		Enabled:            intPtr(normalizeEnabled(enabled)),
-		CreatedAt:          createdAt.String,
-	}, nil
+		ID:                 row.ID,
+		DocumentID:         row.DocumentID,
+		Checksum:           row.Checksum,
+		OriginalFilename:   row.OriginalFilename,
+		Title:              row.Title,
+		OldCategory:        row.OldCategory,
+		OldSubcategory:     row.OldSubcategory,
+		NewCategory:        row.NewCategory,
+		NewSubcategory:     row.NewSubcategory,
+		UserFeedbackReason: row.UserFeedbackReason,
+		RawTextSnippet:     row.RawTextSnippet,
+		RuleKeywords:       normalizeRuleKeywords(row.RuleKeywords),
+		Enabled:            intPtr(normalizeEnabled(row.Enabled)),
+		CreatedAt:          row.CreatedAt,
+	}
 }
 
 // findJSONIndex ports findJsonIndex (manual-decisions-store.ts:205-216): match by id when known,
@@ -847,15 +790,6 @@ func copyFileContents(src, dst string) error {
 		return err
 	}
 	return out.Close()
-}
-
-// mustJSON is JSON.stringify for the keywords column; the value is always a string slice.
-func mustJSON(v []string) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "[]"
-	}
-	return string(b)
 }
 
 // hasNonBlank is `Array.isArray(list) && list.some(k => k.trim())`.

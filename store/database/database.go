@@ -34,6 +34,10 @@
 //     path, relocalize-document.ts:121-123, :216-218, :377-379 and repair-registry.ts:43-45.
 //   - PurgeAll() — `DELETE FROM documents` plus the best-effort `DELETE FROM documents_fts`;
 //     replaces clear-registry.ts:50-52.
+//   - InsertManualDecision / GetManualDecision / ListManualDecisions / UpdateManualDecisionRow /
+//     DeleteManualDecisionRow / ClearManualDecisions — the manual_decisions statements that lived in
+//     manual-decisions-store.ts:119-124, :197, :236, :247-252, :288, :312, so raw SQL for that
+//     table lives here too.
 //
 // Semantic gaps, all resolved to MATCH TS:
 //
@@ -207,6 +211,31 @@ const createManualDecisions = `
       created_at TEXT
     );
 `
+
+// manual_decisions statements, moved verbatim out of
+// src/infrastructure/manual-decisions-store.ts. Every list is explicit for the same positional-scan
+// reason as documentColumnNames (semantic gap 1).
+const (
+	insertManualDecisionSQL = `INSERT INTO manual_decisions (
+        document_id, checksum, original_filename, title,
+        old_category, old_subcategory, new_category, new_subcategory,
+        user_feedback_reason, raw_text_snippet, rule_keywords, enabled, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	manualDecisionColumns = "id, document_id, checksum, original_filename, title, old_category, " +
+		"old_subcategory, new_category, new_subcategory, user_feedback_reason, raw_text_snippet, " +
+		"rule_keywords, enabled, created_at"
+
+	selectManualDecisionsSQL    = "SELECT " + manualDecisionColumns + " FROM manual_decisions ORDER BY id DESC"
+	selectManualDecisionByIDSQL = "SELECT " + manualDecisionColumns + " FROM manual_decisions WHERE id = ?"
+
+	updateManualDecisionRowSQL = `UPDATE manual_decisions SET
+        new_category = ?, new_subcategory = ?, user_feedback_reason = ?, rule_keywords = ?, enabled = ?
+      WHERE id = ?`
+
+	deleteManualDecisionRowSQL = "DELETE FROM manual_decisions WHERE id = ?"
+	clearManualDecisionsSQL    = "DELETE FROM manual_decisions"
+)
 
 // CREATE_FTS mirrors database.ts:177-191. The IF NOT EXISTS form is what the code executes; the
 // plain form is used after a drift DROP.
@@ -1195,4 +1224,200 @@ func (s *Store) GetCategorySubcategoryStats() (CategoryStats, error) {
 		stats.SubcategoryCounts[category][subcategory] += count
 	}
 	return stats, rows.Err()
+}
+
+// ManualDecisionRecord mirrors one manual_decisions row (database.ts:134-151) as the manualdecisions
+// store consumes it. The text columns normalise SQL NULL to "" like every other row struct here;
+// RuleKeywords is the raw stored TEXT (the column default is '[]'; NULL reads as "") and Enabled is
+// the raw nullable INTEGER, so store/manualdecisions keeps applying its own TS-matching normalization
+// instead of this layer guessing at it.
+type ManualDecisionRecord struct {
+	ID                 int64
+	DocumentID         int64
+	Checksum           string
+	OriginalFilename   string
+	Title              string
+	OldCategory        string
+	OldSubcategory     string
+	NewCategory        string
+	NewSubcategory     string
+	UserFeedbackReason string
+	RawTextSnippet     string
+	RuleKeywords       string
+	Enabled            sql.NullInt64
+	CreatedAt          string
+}
+
+// ManualDecisionInsert is the insert input for InsertManualDecision. RuleKeywords is marshalled to
+// the JSON array text the column stores; a nil slice becomes "[]", never JSON null, so a later read
+// still normalises to an empty list (the column default is '[]').
+type ManualDecisionInsert struct {
+	DocumentID         int64
+	Checksum           string
+	OriginalFilename   string
+	Title              string
+	OldCategory        string
+	OldSubcategory     string
+	NewCategory        string
+	NewSubcategory     string
+	UserFeedbackReason string
+	RawTextSnippet     string
+	RuleKeywords       []string
+	Enabled            int
+	CreatedAt          string
+}
+
+// ManualDecisionUpdate is the update input for UpdateManualDecisionRow: exactly the five columns
+// updateManualDecision rewrites (manual-decisions-store.ts:247-252).
+type ManualDecisionUpdate struct {
+	NewCategory        string
+	NewSubcategory     string
+	UserFeedbackReason string
+	RuleKeywords       []string
+	Enabled            int
+}
+
+// scanManualDecision reads one row in manualDecisionColumns order.
+func scanManualDecision(scan func(dest ...any) error) (ManualDecisionRecord, error) {
+	var (
+		rec                                                         ManualDecisionRecord
+		documentID                                                  sql.NullInt64
+		checksum, originalFilename, title                           sql.NullString
+		oldCategory, oldSubcategory, newCategory, newSubcategory    sql.NullString
+		userFeedbackReason, rawTextSnippet, ruleKeywords, createdAt sql.NullString
+	)
+	if err := scan(
+		&rec.ID, &documentID, &checksum, &originalFilename, &title,
+		&oldCategory, &oldSubcategory, &newCategory, &newSubcategory,
+		&userFeedbackReason, &rawTextSnippet, &ruleKeywords, &rec.Enabled, &createdAt,
+	); err != nil {
+		return ManualDecisionRecord{}, err
+	}
+	rec.DocumentID = documentID.Int64
+	rec.Checksum = checksum.String
+	rec.OriginalFilename = originalFilename.String
+	rec.Title = title.String
+	rec.OldCategory = oldCategory.String
+	rec.OldSubcategory = oldSubcategory.String
+	rec.NewCategory = newCategory.String
+	rec.NewSubcategory = newSubcategory.String
+	rec.UserFeedbackReason = userFeedbackReason.String
+	rec.RawTextSnippet = rawTextSnippet.String
+	rec.RuleKeywords = ruleKeywords.String
+	rec.CreatedAt = createdAt.String
+	return rec, nil
+}
+
+// marshalRuleKeywords is `JSON.stringify(ruleKeywords)` for the rule_keywords column, with nil
+// normalised to the column's '[]' default.
+func marshalRuleKeywords(keywords []string) (string, error) {
+	if keywords == nil {
+		keywords = []string{}
+	}
+	b, err := json.Marshal(keywords)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// InsertManualDecision is recordManualDecision's INSERT (manual-decisions-store.ts:119-124) and
+// returns the new row id. A successful INSERT whose driver cannot report a LastInsertId is not
+// turned into an error: the ported caller logs success and mirrors the record without an id, so the
+// id error is swallowed here and 0 is returned, exactly as that path did.
+func (s *Store) InsertManualDecision(rec ManualDecisionInsert) (int64, error) {
+	keywordsJSON, err := marshalRuleKeywords(rec.RuleKeywords)
+	if err != nil {
+		return 0, err
+	}
+	res, err := s.db.Exec(
+		insertManualDecisionSQL,
+		rec.DocumentID,
+		rec.Checksum,
+		rec.OriginalFilename,
+		rec.Title,
+		rec.OldCategory,
+		rec.OldSubcategory,
+		rec.NewCategory,
+		rec.NewSubcategory,
+		rec.UserFeedbackReason,
+		rec.RawTextSnippet,
+		keywordsJSON,
+		rec.Enabled,
+		rec.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, nil
+	}
+	return id, nil
+}
+
+// GetManualDecision is `SELECT ... WHERE id = ?` (manual-decisions-store.ts:236); nil means no row.
+func (s *Store) GetManualDecision(id int64) (*ManualDecisionRecord, error) {
+	row := s.db.QueryRow(selectManualDecisionByIDSQL, id)
+	rec, err := scanManualDecision(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// ListManualDecisions is `SELECT ... ORDER BY id DESC` (manual-decisions-store.ts:197), newest
+// first. An empty table returns a non-nil empty slice.
+func (s *Store) ListManualDecisions() ([]ManualDecisionRecord, error) {
+	rows, err := s.db.Query(selectManualDecisionsSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recs := []ManualDecisionRecord{}
+	for rows.Next() {
+		rec, err := scanManualDecision(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, rec)
+	}
+	return recs, rows.Err()
+}
+
+// UpdateManualDecisionRow is updateManualDecision's UPDATE of the five mutable columns
+// (manual-decisions-store.ts:247-252). A missing id updates zero rows without error, matching the
+// TS db.run.
+func (s *Store) UpdateManualDecisionRow(id int64, upd ManualDecisionUpdate) error {
+	keywordsJSON, err := marshalRuleKeywords(upd.RuleKeywords)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(
+		updateManualDecisionRowSQL,
+		upd.NewCategory,
+		upd.NewSubcategory,
+		upd.UserFeedbackReason,
+		keywordsJSON,
+		upd.Enabled,
+		id,
+	)
+	return err
+}
+
+// DeleteManualDecisionRow is `DELETE ... WHERE id = ?` (manual-decisions-store.ts:288); a missing
+// id deletes zero rows without error.
+func (s *Store) DeleteManualDecisionRow(id int64) error {
+	_, err := s.db.Exec(deleteManualDecisionRowSQL, id)
+	return err
+}
+
+// ClearManualDecisions is `DELETE FROM manual_decisions` (manual-decisions-store.ts:312).
+func (s *Store) ClearManualDecisions() error {
+	_, err := s.db.Exec(clearManualDecisionsSQL)
+	return err
 }

@@ -1,7 +1,7 @@
 package manualdecisions
 
 import (
-	"database/sql"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -19,22 +19,13 @@ import (
 func newTestStore(t *testing.T) (*Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "pdf_triage.db")
 
 	// database.Open creates the schema (documents, blocked_files, manual_decisions) and runs the
-	// idempotent migrations. It is closed once the schema exists; the store gets its own handle on
-	// the same temp file because database.Store exposes no handle and no manual-decision SQL (GAP).
-	seed, err := database.Open(dbPath)
+	// idempotent migrations. It is also the store/database handle this package now depends on, so
+	// the temp file is opened once: store/database owns the manual_decisions SQL.
+	db, err := database.Open(filepath.Join(dir, "pdf_triage.db"))
 	if err != nil {
-		t.Fatalf("database.Open(%s): %v", dbPath, err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("close seed store: %v", err)
-	}
-
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("sql.Open(%s): %v", dbPath, err)
+		t.Fatalf("database.Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -124,17 +115,9 @@ func TestRecordManualDecisionInDBAndMirror(t *testing.T) {
 
 func TestWritesNowhereWhenDecisionsPathNotConfigured(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "pdf_triage.db")
-	seed, err := database.Open(dbPath)
+	db, err := database.Open(filepath.Join(dir, "pdf_triage.db"))
 	if err != nil {
 		t.Fatalf("database.Open: %v", err)
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("close seed: %v", err)
-	}
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
 	}
 	defer db.Close()
 
@@ -687,9 +670,57 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
-// failingDB is the "DB unavailable" double: every query fails so the fallback paths run.
+// failingDB is the "DB unavailable" double: every store/database method fails so the fallback paths
+// run. It implements the six-method DecisionStore interface this package now depends on.
 type failingDB struct{}
 
-func (failingDB) Exec(string, ...any) (sql.Result, error) { return nil, errors.New("db down") }
-func (failingDB) Query(string, ...any) (*sql.Rows, error) { return nil, errors.New("db down") }
-func (failingDB) QueryRow(string, ...any) *sql.Row        { return nil }
+func (failingDB) InsertManualDecision(database.ManualDecisionInsert) (int64, error) {
+	return 0, errors.New("db down")
+}
+
+func (failingDB) GetManualDecision(int64) (*database.ManualDecisionRecord, error) {
+	return nil, errors.New("db down")
+}
+
+func (failingDB) ListManualDecisions() ([]database.ManualDecisionRecord, error) {
+	return nil, errors.New("db down")
+}
+
+func (failingDB) UpdateManualDecisionRow(int64, database.ManualDecisionUpdate) error {
+	return errors.New("db down")
+}
+
+func (failingDB) DeleteManualDecisionRow(int64) error { return errors.New("db down") }
+func (failingDB) ClearManualDecisions() error         { return errors.New("db down") }
+
+// TestPackageContainsNoRawSQL enforces the migration rule that raw SQL for manual_decisions lives
+// ONLY in store/database: every .go file in this package must be free of the SQL keywords. The
+// needles are assembled at run time so the guard cannot flag its own source, and no file is
+// excluded.
+func TestPackageContainsNoRawSQL(t *testing.T) {
+	needles := []string{
+		"SEL" + "ECT",
+		"INS" + "ERT",
+		"UPD" + "ATE",
+		"DEL" + "ETE FROM",
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		data, err := os.ReadFile(entry.Name())
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", entry.Name(), err)
+		}
+		for _, needle := range needles {
+			if bytes.Contains(data, []byte(needle)) {
+				t.Errorf("%s contains forbidden SQL keyword %q; raw SQL lives only in store/database",
+					entry.Name(), needle)
+			}
+		}
+	}
+}
