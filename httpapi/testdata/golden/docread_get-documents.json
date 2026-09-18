@@ -1,0 +1,41 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "total": 1,
+    "documents": [
+      {
+        "id": 1,
+        "checksum": "abc123",
+        "title": "Facture SFR Janvier",
+        "registre": "REF-001",
+        "date": "2026-01-15",
+        "category": "invoices",
+        "subcategory": "sfr",
+        "summary": "Facture mensuelle SFR pour janvier",
+        "tags": [
+          "facture",
+          "sfr"
+        ],
+        "raw_text": "Contenu complet de la facture SFR de janvier 2026",
+        "markdown_content": "# Facture SFR",
+        "total_amount": "",
+        "vat_amount": "",
+        "siren": "",
+        "iban": "",
+        "expiry_date": "",
+        "contact_name": "",
+        "contact_email": "",
+        "contact_phone": "",
+        "contact_address": "",
+        "contact_website": "",
+        "original_filename": "facture.pdf",
+        "original_path": "C:/pdf-triage-test/__raws/facture.pdf",
+        "new_path": "",
+        "status": "COMPLETED",
+        "created_at": "2026-01-15T10:00:00.000Z",
+        "updated_at": "2026-01-15T10:00:00.000Z"
+      }
+    ]
+  }
+}

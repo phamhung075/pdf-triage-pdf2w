@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "contentType": "text/csv; charset=utf-8",
+  "body": "\ufeff\"ID\",\"Checksum\",\"Title\",\"Category\",\"Subcategory\",\"Date\",\"Expiry Date\",\"Total Amount\",\"VAT Amount\",\"SIREN\",\"IBAN\",\"Contact Name\",\"Contact Email\",\"Contact Phone\",\"Contact Address\",\"Contact Website\",\"Reference\",\"Status\",\"Summary\",\"Original Filename\",\"New Path\"\r\n\"1\",\"abc123\",\"Facture SFR Janvier\",\"invoices\",\"sfr\",\"2026-01-15\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"REF-001\",\"COMPLETED\",\"Facture mensuelle SFR pour janvier\",\"facture.pdf\",\"C:/pdf-triage-test/__raws/facture.pdf\"",
+  "disposition": "attachment; filename=\"smart_pdf_triage_export_2026-09-18.csv\""
+}

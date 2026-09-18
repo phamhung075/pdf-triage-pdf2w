@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "status": "active",
+    "connected": true,
+    "toolsCount": 2,
+    "tools": [
+      {
+        "name": "search_documents",
+        "description": "Search the registry"
+      },
+      {
+        "name": "list_categories",
+        "description": "List categories"
+      }
+    ]
+  }
+}
