@@ -73,7 +73,19 @@ is `127.0.0.1` and the port is single-instance-locked at `DATA_DIR/.server.lock`
 EADDRINUSE take-over behavior as the TypeScript server). The MCP streamable HTTP transport is the
 one LAN-reachable surface and is protected by the bearer token stored in `BASE_DIR/.mcp-api-token`.
 
+## Cutover differential check
+
+`cmd/pdf-triage/differential_test.go` compares this Go server against the real TypeScript app over
+byte copies of a real database. It is skipped unless `PDF_TRIAGE_DIFF_DB_GO` and
+`PDF_TRIAGE_DIFF_TS_FIXTURE` are set. Never point it at the live `pdf_triage.db`: always `cp` the
+database first, run with empty temporary input/output dirs, and never bind a fixed port. See the
+report in the pdf-triage repo at
+`docs/superpowers/specs/2026-09-18-cutover-differential-report.md`.
+
 ## Run
+
+Obsolete at cutover: this older canonical-path helper service is superseded by `cmd/pdf-triage`; the
+command below is kept only as a historical reference.
 
 ```sh
 go run ./cmd/server        # listens on :3985 (PORT env var to override)

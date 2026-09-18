@@ -52,14 +52,11 @@
 //
 // # Reported interface gaps (not worked around)
 //
-//  1. httpapi.NewServer returns only an http.Handler and keeps its *server (and therefore its *Hub)
-//     unexported. The composition root captures the *httpapi.Server through a RouteGroup so the
-//     auto-watcher can share the in-memory ScanGate, but it cannot reach that server's SSE Hub.
-//     The Watcher is therefore wired with a nil Hub: manual scans still stream every SCAN_*/FILE_*
-//     event (the route handlers broadcast through the real hub), and the watcher's TASK_* updates
-//     still reach the real hub through the shared taskstate.Manager broadcaster, but the watcher's
-//     own raw scan events are not delivered to SSE clients. Fixing this needs an exported
-//     Hub accessor (e.g. NewServerWithHub or a Server.Hub() method); httpapi was not edited.
+//  1. The composition root captures the *httpapi.Server through a RouteGroup and shares its SSE Hub
+//     with the auto-watcher via httpapi.(*Server).Hub(), so the watcher now broadcasts its own raw
+//     SCAN_*/FILE_* frames through the server's own hub to the same dashboard clients as a manual
+//     scan (TASK_* updates already arrive through the shared taskstate.Manager broadcaster).
+//     TestWatcherSSEBroadcastsScanFrames pins this.
 //  2. httpapi's jsonBodyMiddleware caps every request body at 100 kB before handlers run, while
 //     POST /api/images/import documents a 64 MB limit. The gap is pre-existing and reported by the
 //     httpapi port itself; this composition root does not compensate for it.
