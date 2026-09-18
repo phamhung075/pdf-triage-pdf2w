@@ -18,6 +18,61 @@ NOT ported here as standalone HTTP calls — see pdf-triage's
 full Go backend can replace the TypeScript one outright, rather than turning every call site into
 a network hop).
 
+## Running the pdf-triage backend
+
+`cmd/pdf-triage` is the composition root that replaces `src/index.ts`, `src/vision-lab-main.ts` and
+the npm scripts `dev`/`start`/`scan`/`mcp`/`vision:dev`. It wires the ported `app/`, `store/`,
+`infra/`, `httpapi`, `mcpserver` and `visionlab` packages into one binary:
+
+```sh
+make build                 # -> dist/pdf-triage, static (CGO_ENABLED=0)
+make cross                 # -> dist/pdf-triage-linux-amd64 + dist/pdf-triage-windows-amd64.exe
+./dist/pdf-triage serve        # HTTP + SSE dashboard/API + 10 s auto-watcher
+./dist/pdf-triage scan         # one-shot triage scan; non-zero exit when Ollama is down
+./dist/pdf-triage mcp          # MCP over stdio (+ streamable HTTP per settings)
+./dist/pdf-triage vision-lab   # standalone Vision Lab diagnostic server
+```
+
+`make test`, `make vet` and `make fmt` run the Go suite, `go vet` and `gofmt` across the module.
+
+**Cutover:** the binary opens the EXISTING `pdf_triage.db`, `settings.json`, `categories.json` /
+`.categories.private.json`, `manual_decisions.json`, `taxonomy_hints.json` and
+`.prompts.private.json` unchanged — there is no data migration, and reverting to the TypeScript
+backend touches nothing.
+
+### Configuration (infra/settings)
+
+`BASE_DIR` defaults to the process working directory and is overridable with
+`PDF_TRIAGE_BASE_DIR`; `DATA_DIR` defaults to `BASE_DIR` and is overridable with
+`PDF_TRIAGE_DATA_DIR`. Runtime settings live in `DATA_DIR/settings.json`
+(`language`, `input_dir`, `output_root_dir`, `ollama_model`, `ollama_host`,
+`personal_name_denylist`), edited by the dashboard. The environment variables, all read by
+`infra/settings` (see `settings.go` and `.env.example` at the repository root), are:
+
+| Variable | Purpose |
+| --- | --- |
+| `PDF_TRIAGE_BASE_DIR`, `PDF_TRIAGE_DATA_DIR` | asset root / writable state root |
+| `PDF_INPUT_DIR`, `PDF_OUTPUT_DIR` | incoming (`__raws`) and archive (`__archive`) folders |
+| `PDF_DB_PATH`, `PDF_REGISTRY_PATH` | SQLite file and JSON mirror |
+| `SYSTEM_LANGUAGE` | `FR` (default) or `EN` |
+| `PORT`, `PDF_TRIAGE_HOST` | dashboard port (3971) and bind host (127.0.0.1) |
+| `VISION_LAB_PORT` | Vision Lab port (3179) |
+| `OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`, `OLLAMA_VISION_MODEL` | Ollama endpoints; `qwen3.5:9b` is pinned for classification |
+| `PDF2W_SERVICE_URL`, `PDF2W_SERVICE_TIMEOUT_MS` | required external pdf2w extraction service |
+| `MCP_HTTP_PORT`, `MCP_HTTP_HOST` | MCP streamable-HTTP transport (3972 / 0.0.0.0) |
+| `PDF_TRIAGE_LOG_DIR`, `PDF_TRIAGE_LOG_MAX_BYTES`, `PDF_TRIAGE_LOG_RETAIN` | log rotation |
+
+A `.env` in `DATA_DIR` (falling back to `BASE_DIR`) is loaded without overriding already-set
+process variables.
+
+### Dashboard
+
+`serve` mounts `BASE_DIR/public` as static files with `Cache-Control: no-store`, exactly as
+`web-server.ts` did; `/` serves `index.html`. There is no authentication, so the default bind host
+is `127.0.0.1` and the port is single-instance-locked at `DATA_DIR/.server.lock` (with the same
+EADDRINUSE take-over behavior as the TypeScript server). The MCP streamable HTTP transport is the
+one LAN-reachable surface and is protected by the bearer token stored in `BASE_DIR/.mcp-api-token`.
+
 ## Run
 
 ```sh
