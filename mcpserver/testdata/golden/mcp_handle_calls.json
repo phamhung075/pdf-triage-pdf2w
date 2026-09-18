@@ -1,0 +1,461 @@
+[
+  {
+    "tool": "search_documents",
+    "args": {
+      "category": "INVOICES"
+    },
+    "isError": false,
+    "text": "{\n  \"count\": 2,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"registre\": \"REF-002\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    },\n    {\n      \"id\": 1,\n      \"title\": \"Facture SFR Janvier\",\n      \"registre\": \"REF-001\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"sfr\",\n      \"file_type\": \"PDF\",\n      \"summary\": \"Facture mensuelle SFR pour janvier\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 2,
+      "results": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "registre": "REF-002",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "new_path": "",
+          "status": "COMPLETED"
+        },
+        {
+          "id": 1,
+          "title": "Facture SFR Janvier",
+          "registre": "REF-001",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "sfr",
+          "file_type": "PDF",
+          "summary": "Facture mensuelle SFR pour janvier",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "search_documents",
+    "args": {
+      "subcategory": "SFR"
+    },
+    "isError": false,
+    "text": "{\n  \"count\": 1,\n  \"results\": [\n    {\n      \"id\": 1,\n      \"title\": \"Facture SFR Janvier\",\n      \"registre\": \"REF-001\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"sfr\",\n      \"file_type\": \"PDF\",\n      \"summary\": \"Facture mensuelle SFR pour janvier\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 1,
+      "results": [
+        {
+          "id": 1,
+          "title": "Facture SFR Janvier",
+          "registre": "REF-001",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "sfr",
+          "file_type": "PDF",
+          "summary": "Facture mensuelle SFR pour janvier",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "search_documents",
+    "args": {
+      "query": "ELECTRICITE"
+    },
+    "isError": false,
+    "text": "{\n  \"count\": 1,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"registre\": \"REF-002\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 1,
+      "results": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "registre": "REF-002",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "search_documents",
+    "args": {
+      "fileType": "IMAGE"
+    },
+    "isError": false,
+    "text": "{\n  \"count\": 1,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"registre\": \"REF-002\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 1,
+      "results": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "registre": "REF-002",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "search_documents",
+    "args": {
+      "limit": 1
+    },
+    "isError": false,
+    "text": "{\n  \"count\": 1,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"registre\": \"REF-002\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 1,
+      "results": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "registre": "REF-002",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "search_documents",
+    "args": {},
+    "isError": false,
+    "text": "{\n  \"count\": 2,\n  \"results\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"registre\": \"REF-002\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    },\n    {\n      \"id\": 1,\n      \"title\": \"Facture SFR Janvier\",\n      \"registre\": \"REF-001\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"sfr\",\n      \"file_type\": \"PDF\",\n      \"summary\": \"Facture mensuelle SFR pour janvier\",\n      \"new_path\": \"\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "count": 2,
+      "results": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "registre": "REF-002",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "new_path": "",
+          "status": "COMPLETED"
+        },
+        {
+          "id": 1,
+          "title": "Facture SFR Janvier",
+          "registre": "REF-001",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "sfr",
+          "file_type": "PDF",
+          "summary": "Facture mensuelle SFR pour janvier",
+          "new_path": "",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "get_full_document_text",
+    "args": {
+      "docId": 1
+    },
+    "isError": false,
+    "text": "{\n  \"id\": 1,\n  \"title\": \"Facture SFR Janvier\",\n  \"registre\": \"REF-001\",\n  \"date\": \"2026-01-15\",\n  \"category\": \"invoices\",\n  \"summary\": \"Facture mensuelle SFR pour janvier\",\n  \"file_path\": \"C:/raws/facture.pdf\",\n  \"raw_text\": \"Contenu complet de la facture SFR de janvier 2026\"\n}",
+    "json": {
+      "id": 1,
+      "title": "Facture SFR Janvier",
+      "registre": "REF-001",
+      "date": "2026-01-15",
+      "category": "invoices",
+      "summary": "Facture mensuelle SFR pour janvier",
+      "file_path": "C:/raws/facture.pdf",
+      "raw_text": "Contenu complet de la facture SFR de janvier 2026"
+    }
+  },
+  {
+    "tool": "get_full_document_text",
+    "args": {
+      "docId": 9999
+    },
+    "isError": true,
+    "text": "Error: Document ID 9999 not found",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1.5,
+      "title": "x"
+    },
+    "isError": true,
+    "text": "Error: docId must be a positive integer, got: 1.5",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 0
+    },
+    "isError": true,
+    "text": "Error: docId must be a positive integer, got: 0",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": -3
+    },
+    "isError": true,
+    "text": "Error: docId must be a positive integer, got: -3",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1,
+      "category": 123
+    },
+    "isError": true,
+    "text": "Error: invalid arguments — [\n  {\n    \"code\": \"invalid_type\",\n    \"expected\": \"string\",\n    \"received\": \"number\",\n    \"path\": [\n      \"category\"\n    ],\n    \"message\": \"Expected string, received number\"\n  }\n]",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1,
+      "subcategory": "general"
+    },
+    "isError": true,
+    "text": "Error: 'general' is not a valid subcategory (general/other/divers/year strings are not allowed — Golden Rule #4). Please choose a specific entity or document-type name.",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1,
+      "subcategory": "2024"
+    },
+    "isError": true,
+    "text": "Error: '2024' is not a valid subcategory (general/other/divers/year strings are not allowed — Golden Rule #4). Please choose a specific entity or document-type name.",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1,
+      "subcategorie": "divers"
+    },
+    "isError": true,
+    "text": "Error: 'divers' is not a valid subcategory (general/other/divers/year strings are not allowed — Golden Rule #4). Please choose a specific entity or document-type name.",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 9999,
+      "subcategory": "sfr"
+    },
+    "isError": true,
+    "text": "Error: Document ID 9999 not found",
+    "json": null
+  },
+  {
+    "tool": "trigger_triage",
+    "args": {},
+    "isError": false,
+    "text": "{\n  \"scannedCount\": 3,\n  \"processedCount\": 2,\n  \"skippedCount\": 1,\n  \"items\": [\n    {\n      \"filename\": \"a.pdf\",\n      \"docId\": 1,\n      \"title\": \"Facture SFR Janvier\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"sfr\",\n      \"newPath\": \"/archive/invoices/sfr/2026/a.pdf\",\n      \"status\": \"COMPLETED\"\n    }\n  ]\n}",
+    "json": {
+      "scannedCount": 3,
+      "processedCount": 2,
+      "skippedCount": 1,
+      "items": [
+        {
+          "filename": "a.pdf",
+          "docId": 1,
+          "title": "Facture SFR Janvier",
+          "category": "invoices",
+          "subcategory": "sfr",
+          "newPath": "/archive/invoices/sfr/2026/a.pdf",
+          "status": "COMPLETED"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "trigger_triage",
+    "args": {},
+    "isError": true,
+    "text": "Error: A scan/repair/clear operation is already in progress (held by process 4242). Try again shortly.",
+    "json": null
+  },
+  {
+    "tool": "trigger_triage",
+    "args": {},
+    "isError": true,
+    "text": "Error executing trigger_triage: disk exploded",
+    "json": null
+  },
+  {
+    "tool": "list_categories",
+    "args": {},
+    "isError": false,
+    "text": "[\n  {\n    \"id\": \"invoices\",\n    \"name\": \"Invoices\",\n    \"description\": \"\",\n    \"aliases\": [],\n    \"subcategories\": []\n  }\n]",
+    "json": [
+      {
+        "id": "invoices",
+        "name": "Invoices",
+        "description": "",
+        "aliases": [],
+        "subcategories": []
+      }
+    ]
+  },
+  {
+    "tool": "prepare_dossier",
+    "args": {
+      "dossierType": "housing"
+    },
+    "isError": false,
+    "text": "{\n  \"dossierType\": \"housing\",\n  \"count\": 2,\n  \"documents\": [\n    {\n      \"id\": 2,\n      \"title\": \"Facture EDF Fevrier\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"edf\",\n      \"file_type\": \"IMAGE\",\n      \"summary\": \"Facture electricite\",\n      \"total_amount\": \"99.00\",\n      \"new_path\": \"C:/raws/edf.png\"\n    },\n    {\n      \"id\": 1,\n      \"title\": \"Facture SFR Janvier\",\n      \"date\": \"2026-01-15\",\n      \"category\": \"invoices\",\n      \"subcategory\": \"sfr\",\n      \"file_type\": \"PDF\",\n      \"summary\": \"Facture mensuelle SFR pour janvier\",\n      \"total_amount\": \"42.00\",\n      \"new_path\": \"C:/raws/facture.pdf\"\n    }\n  ]\n}",
+    "json": {
+      "dossierType": "housing",
+      "count": 2,
+      "documents": [
+        {
+          "id": 2,
+          "title": "Facture EDF Fevrier",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "edf",
+          "file_type": "IMAGE",
+          "summary": "Facture electricite",
+          "total_amount": "99.00",
+          "new_path": "C:/raws/edf.png"
+        },
+        {
+          "id": 1,
+          "title": "Facture SFR Janvier",
+          "date": "2026-01-15",
+          "category": "invoices",
+          "subcategory": "sfr",
+          "file_type": "PDF",
+          "summary": "Facture mensuelle SFR pour janvier",
+          "total_amount": "42.00",
+          "new_path": "C:/raws/facture.pdf"
+        }
+      ]
+    }
+  },
+  {
+    "tool": "get_document_markdown",
+    "args": {
+      "docId": 1
+    },
+    "isError": false,
+    "text": "{\n  \"id\": 1,\n  \"title\": \"Facture SFR Janvier\",\n  \"category\": \"invoices\",\n  \"subcategory\": \"sfr\",\n  \"date\": \"2026-01-15\",\n  \"summary\": \"Facture mensuelle SFR pour janvier\",\n  \"total_amount\": \"42.00\",\n  \"contact_name\": \"SFR\",\n  \"contact_email\": \"contact@sfr.fr\",\n  \"contact_phone\": \"0102030405\",\n  \"markdown_content\": \"# Facture SFR\",\n  \"file_path\": \"C:/raws/facture.pdf\"\n}",
+    "json": {
+      "id": 1,
+      "title": "Facture SFR Janvier",
+      "category": "invoices",
+      "subcategory": "sfr",
+      "date": "2026-01-15",
+      "summary": "Facture mensuelle SFR pour janvier",
+      "total_amount": "42.00",
+      "contact_name": "SFR",
+      "contact_email": "contact@sfr.fr",
+      "contact_phone": "0102030405",
+      "markdown_content": "# Facture SFR",
+      "file_path": "C:/raws/facture.pdf"
+    }
+  },
+  {
+    "tool": "get_document_markdown",
+    "args": {
+      "docId": 9999
+    },
+    "isError": true,
+    "text": "Error: Document ID 9999 not found",
+    "json": null
+  },
+  {
+    "tool": "open_document_folder",
+    "args": {
+      "docId": 1
+    },
+    "isError": false,
+    "text": "Opened OS file manager at file: <TMP>/mcp-golden-doc.pdf",
+    "json": null
+  },
+  {
+    "tool": "open_document_folder",
+    "args": {
+      "docId": 2
+    },
+    "isError": true,
+    "text": "Error: File for doc ID 2 does not exist on disk",
+    "json": null
+  },
+  {
+    "tool": "package_documents",
+    "args": {
+      "docIds": [
+        1,
+        2
+      ],
+      "zipName": "unit_test_pack"
+    },
+    "isError": false,
+    "text": "{\n  \"zipPath\": \"<BASE>/__packages/unit_test_pack.zip\",\n  \"fileCount\": 1,\n  \"includedDocIds\": [\n    1\n  ],\n  \"missingDocIds\": [\n    2\n  ]\n}",
+    "json": {
+      "zipPath": "<BASE>/__packages/unit_test_pack.zip",
+      "fileCount": 1,
+      "includedDocIds": [
+        1
+      ],
+      "missingDocIds": [
+        2
+      ]
+    }
+  },
+  {
+    "tool": "package_documents",
+    "args": {},
+    "isError": true,
+    "text": "Error: provide either docIds or dossierType.",
+    "json": null
+  },
+  {
+    "tool": "does_not_exist",
+    "args": {},
+    "isError": true,
+    "text": "Unknown tool name: does_not_exist",
+    "json": null
+  },
+  {
+    "tool": "update_document_metadata",
+    "args": {
+      "docId": 1,
+      "summary": "Updated summary only"
+    },
+    "isError": false,
+    "text": "Successfully updated metadata for document ID 1",
+    "json": null
+  }
+]
