@@ -96,16 +96,16 @@ func findBaseDir(explicit string) string {
 	if err != nil {
 		return "."
 	}
-	if hasPublicDir(wd) {
-		return wd
-	}
-	parent := filepath.Clean(filepath.Join(wd, ".."))
-	if hasPublicDir(parent) {
-		return parent
-	}
-	grandparent := filepath.Clean(filepath.Join(wd, "..", ".."))
-	if hasPublicDir(grandparent) {
-		return grandparent
+	dir := wd
+	for {
+		if hasPublicDir(dir) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 	return wd
 }
