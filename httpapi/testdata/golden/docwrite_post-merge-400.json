@@ -1,0 +1,5 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": { "error": "At least 2 PDF filepaths are required for merging." }
+}

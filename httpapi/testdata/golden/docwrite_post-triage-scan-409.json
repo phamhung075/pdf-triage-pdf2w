@@ -1,0 +1,5 @@
+{
+  "status": 409,
+  "contentType": "application/json; charset=utf-8",
+  "body": { "error": "A scan/repair/clear operation is already in progress. Try again shortly." }
+}
