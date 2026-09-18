@@ -2,10 +2,16 @@ GO ?= go
 BINARY ?= pdf-triage
 CMD := ./cmd/pdf-triage
 DIST := dist
+AIR ?= $(shell which air 2>/dev/null || test -x $(HOME)/go/bin/air && echo $(HOME)/go/bin/air || echo air)
 
-.PHONY: all build test vet fmt cross linux windows clean
+.PHONY: all build dev test vet fmt cross linux windows clean
 
 all: build
+
+## dev: run server directly from source with change on save (air or go run)
+dev:
+	@mkdir -p tmp
+	@PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-..}" $(AIR) 2>/dev/null || PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-..}" $(GO) run $(CMD) serve
 
 ## build: static binary for the host platform.
 build:
