@@ -19,21 +19,18 @@
 // Qwen prompt and the deterministic ruleBasedClassify fallback (matchPriorityRules) stay
 // logically aligned — Golden Rule #6.
 //
-// The only external behavior it depends on is taxonomy.IsForbiddenSubcategory, imported from the
-// sibling taxonomy package rather than reimplemented.
+// It reuses, rather than redefines, taxonomy.IsForbiddenSubcategory and the PriorityRule shape
+// from the sibling promptpersonalization package. The TS PriorityRule type is a z.infer of the
+// schema in prompt-personalization.ts, so promptpersonalization.PriorityRule is its single Go
+// definition and this package imports it instead of carrying a duplicate struct.
 //
 // The TypeScript source is the behavioral source of truth. Two deviations are intentional:
 //
-//  1. The TS PriorityRule type is inferred from a Zod schema in prompt-personalization.ts, which
-//     is not ported to Go yet. This package defines an equivalent plain PriorityRule struct with
-//     the same fields (keywords, category, optional subcategory, optional note, optional
-//     scope defaulting to "all"); decisionsToPriorityRules always sets scope "filename", so the
-//     default is never observable here.
-//  2. deaccent ports JS `token.normalize('NFD').replace(/[\u0300-\u036f]/g, ”)` with the same
+//  1. deaccent ports JS `token.normalize('NFD').replace(/[\u0300-\u036f]/g, ”)` with the same
 //     hand-written precomposed-Latin fold table used by the taxonomyconflicts package, because
 //     Go's standard library has no Unicode normalization. The table covers Latin-1 Supplement and
 //     Latin Extended-A, the scripts the corpus's French stopwords use.
-//  3. decisionsToPriorityRules' TS `maxRules = MAX_DECISION_RULES` default parameter becomes a
+//  2. decisionsToPriorityRules' TS `maxRules = MAX_DECISION_RULES` default parameter becomes a
 //     variadic `maxRules ...int`; omitting it preserves the default. Behavior is otherwise
 //     identical.
 package decisionrule
@@ -45,19 +42,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/phamhung075/pdf-triage-pdf2w/promptpersonalization"
 	"github.com/phamhung075/pdf-triage-pdf2w/taxonomy"
 )
-
-// PriorityRule is the Go equivalent of the TS `PriorityRule` shape from
-// prompt-personalization.ts. Scope is "all" or "filename"; the empty string is the Go equivalent
-// of the TS default "all".
-type PriorityRule struct {
-	Keywords    []string `json:"keywords"`
-	Category    string   `json:"category"`
-	Subcategory string   `json:"subcategory,omitempty"`
-	Note        string   `json:"note,omitempty"`
-	Scope       string   `json:"scope,omitempty"`
-}
 
 // HumanDecisionLike is the structural subset of a manual-decisions record — keeps this domain
 // module free of infra types. Enabled is a pointer so the TS `enabled?: number` (undefined)
@@ -313,13 +300,13 @@ func DeriveRuleKeywords(filename, title string) []string {
 //
 // Only the most recent `maxRules` decisions are injected, so a growing feedback log cannot
 // bloat the prompt into the token budget. Omitting maxRules uses MaxDecisionRules.
-func DecisionsToPriorityRules(decisions []HumanDecisionLike, maxRules ...int) []PriorityRule {
+func DecisionsToPriorityRules(decisions []HumanDecisionLike, maxRules ...int) []promptpersonalization.PriorityRule {
 	limit := MaxDecisionRules
 	if len(maxRules) > 0 {
 		limit = maxRules[0]
 	}
 
-	rules := []PriorityRule{}
+	rules := []promptpersonalization.PriorityRule{}
 	for _, d := range decisions {
 		if len(rules) >= limit {
 			break
@@ -380,7 +367,7 @@ func DecisionsToPriorityRules(decisions []HumanDecisionLike, maxRules ...int) []
 			keywords = keywords[:MaxKeywordsPerDecision]
 		}
 
-		rules = append(rules, PriorityRule{
+		rules = append(rules, promptpersonalization.PriorityRule{
 			Keywords:    keywords,
 			Category:    category,
 			Subcategory: subcategory,

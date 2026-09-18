@@ -13,8 +13,8 @@
 //	{{USER_PRIORITY_RULES}}  in prompts/classification_rules.md  <- renderPriorityRulesBlock
 //	{{USER_KNOWN_ENTITIES}}  in prompts/micro_prompt_entity.md   <- renderKnownEntitiesBlock
 //
-// PriorityRule is deliberately FIELD-COMPATIBLE with decisionrule.PriorityRule (same fields, same
-// json tags) so a later task can unify the two without a data migration.
+// PriorityRule is consumed directly by the sibling decisionrule package, which imports this type
+// rather than defining its own; there is a single Go definition, so no data migration is needed.
 //
 // The TypeScript source is the behavioral source of truth. Deviations, all resolved in favor of
 // matching TS:
@@ -47,8 +47,9 @@ import (
 )
 
 // PriorityRule is the Go equivalent of the TS `PriorityRule` shape (z.infer of
-// PriorityRuleSchema). It is field-compatible with decisionrule.PriorityRule: the empty Subcategory
-// / Note strings are the Go equivalent of TS undefined, and Scope is "all" or "filename".
+// PriorityRuleSchema), and it is the single Go definition consumed directly by the sibling
+// decisionrule package. The empty Subcategory / Note strings are the Go equivalent of TS
+// undefined, and Scope is "all" or "filename".
 type PriorityRule struct {
 	Keywords    []string `json:"keywords"`
 	Category    string   `json:"category"`
