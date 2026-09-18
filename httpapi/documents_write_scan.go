@@ -119,8 +119,11 @@ func (s *server) registryRepairHandler(d DocumentWriteDeps, w http.ResponseWrite
 	}{Message: "Registry repair completed successfully", Result: result})
 }
 
-// applyRepairProgress ports the repair onProgress block (web-server.ts:263-270). repair emits typed
-// structs through an `any` seam, so the type switch is the discriminator.
+// applyRepairProgress ports the repair onProgress block (web-server.ts:263-270). Repair emits typed
+// structs through an `any` seam, so the type switch is the discriminator. TS handles ONLY
+// REPAIR_STARTED and FILE_PROGRESS/FILE_COMPLETED: a FILE_FAILED event is broadcast but must not
+// touch the task state (no UpdateTaskProgress, so Stage/CurrentFile keep their previous values
+// instead of being overwritten with empty pointers).
 func applyRepairProgress(tasks DocumentWriteTasks, event any) {
 	if tasks == nil {
 		return
@@ -148,15 +151,6 @@ func applyRepairProgress(tasks DocumentWriteTasks, event any) {
 		update.Stage = &stage
 		update.Message = &message
 		tasks.UpdateTaskProgress(update)
-	case repair.FileFailedEvent:
-		count := 0
-		filename, stage, message := evt.Filename, evt.Stage, evt.Message
-		tasks.UpdateTaskProgress(taskstate.ProgressUpdate{
-			ProcessedFiles: count,
-			CurrentFile:    &filename,
-			Stage:          &stage,
-			Message:        &message,
-		})
 	}
 }
 

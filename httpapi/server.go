@@ -34,7 +34,10 @@
 //
 // Server-level behavior ported from the same file:
 //
-//   - express.json() becomes jsonBodyMiddleware (100 kB cap, expressed body decoded per handler).
+//   - express.json() becomes jsonBodyMiddleware: it applies only to `application/json` (the
+//     default Express type), caps it at 100 kB, rejects malformed JSON with 400 before any handler,
+//     and leaves every other content type unread for its route (the image import). The exact
+//     error-body deviation is documented on the middleware.
 //   - express.static(publicDir, { Cache-Control: no-store }) becomes the "/" handler registered
 //     last, with the same no-store header and the same "only when public/ exists" condition.
 //   - NO CORS and NO auth, exactly as web-server.ts:56-59 explains; the port adds neither.
@@ -354,25 +357,61 @@ func noStore(next http.Handler) http.Handler {
 // bodyCtxKey stores the raw request body read by jsonBodyMiddleware.
 type bodyCtxKey struct{}
 
-// jsonBodyMiddleware is express.json(): it reads the JSON body once (up to maxJSONBody) so handlers
-// can parse it with decodeBody or documentschema.Parse*. Malformed JSON is rejected with the same
-// 400 class the Express parser produced.
+// jsonBodyMiddleware is express.json(): it applies ONLY to `application/json` (case-insensitive,
+// an optional `; charset=...` parameter allowed), reads that body once up to maxJSONBody, and
+// rejects malformed JSON with 400 before any handler runs. Every other content type — notably the
+// `application/octet-stream` body POST /api/images/import owns — is left unread for its route, so a
+// 64 MB image upload is not capped by the JSON limit. This mirrors the probe-verified Express
+// behavior: express.json()'s default type matches exactly `application/json` and NOT
+// `application/vnd.*+json`, and its `strict:true` default accepts only a top-level object or array.
+//
+// Body shape note (reported TS-vs-Go deviation, D5): Express has no error middleware, so a
+// malformed JSON body is answered by its development-mode default handler with an HTML page that
+// embeds the absolute body-parser install path (verified with a throwaway supertest probe). That is
+// not a portable contract. The port keeps the `{error:<string>}` JSON shape every other error uses
+// and the exact 400/413 statuses.
 func jsonBodyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
-			data, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBody+1))
-			if err != nil {
+		if r.Body == nil || !isJSONContentType(r.Header.Get("Content-Type")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBody+1))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if len(data) > maxJSONBody {
+			writeError(w, http.StatusRequestEntityTooLarge, "request entity too large")
+			return
+		}
+		trimmed := bytes.TrimSpace(data)
+		if len(trimmed) > 0 {
+			var parsed any
+			if err := json.Unmarshal(trimmed, &parsed); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			if len(data) > maxJSONBody {
-				writeError(w, http.StatusRequestEntityTooLarge, "request entity too large")
+			// body-parser's strict default: only an object or an array is a valid top-level body.
+			switch parsed.(type) {
+			case map[string]any, []any:
+			default:
+				writeError(w, http.StatusBadRequest, "Unexpected token in JSON")
 				return
 			}
-			r = r.WithContext(context.WithValue(r.Context(), bodyCtxKey{}, data))
 		}
+		r = r.WithContext(context.WithValue(r.Context(), bodyCtxKey{}, data))
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isJSONContentType is express.json()'s default type match: exactly `application/json`,
+// case-insensitive, with optional parameters. A probe against the project's express@4.22 /
+// body-parser@1.20 confirmed `application/vnd.api+json` and `application/json-patch+json` are NOT
+// parsed, so only `application/json` is accepted here.
+func isJSONContentType(contentType string) bool {
+	mediaType := strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
+	return strings.EqualFold(mediaType, "application/json")
 }
 
 // bodyBytes returns the raw body captured by jsonBodyMiddleware. An absent/empty body yields nil,

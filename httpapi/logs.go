@@ -8,7 +8,6 @@ package httpapi
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/logger"
 )
@@ -69,8 +68,15 @@ func toLogEntryJSONList(entries []logger.LogEntry) []logEntryJSON {
 func (s *server) logsRecentHandler(w http.ResponseWriter, r *http.Request) {
 	limit := 300
 	if raw := r.URL.Query().Get("limit"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil {
-			limit = parsed
+		// TS: `req.query.limit ? parseInt(req.query.limit, 10) : 300`. A non-numeric limit parses
+		// to NaN and is passed on: getRecentLogs(NaN) is `logBuffer.slice(-NaN)`, i.e. `slice(0)`,
+		// the whole buffer. infra/logger documents the same equivalence for RecentLogs(0)
+		// (logger.go deviation 3: JS `slice(-0)` and any non-positive limit return every entry),
+		// so a non-numeric limit forwards 0 rather than silently keeping the 300 default.
+		if parsed, ok := parseJSInt(raw); ok {
+			limit = int(parsed)
+		} else {
+			limit = 0
 		}
 	}
 	writeJSON(w, 200, map[string]any{"logs": toLogEntryJSONList(s.deps.Logs.RecentLogs(limit))})

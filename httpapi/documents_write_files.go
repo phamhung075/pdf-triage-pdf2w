@@ -52,16 +52,13 @@ func pdfConfiguration() *model.Configuration {
 // --- #27 POST /api/images/import -----------------------------------------------------------------
 
 func (s *server) importImageHandler(d DocumentWriteDeps, w http.ResponseWriter, r *http.Request) {
-	body, status, message := readImportBody(r)
-	if status != 0 {
-		writeError(w, status, message)
-		return
-	}
-
 	// basename() then a strict slug: the name comes from the browser and lands in a path.join.
 	safeName := sanitizeImportFilename(r.URL.Query().Get("filename"))
 	ext := strings.ToLower(path.Ext(safeName))
 
+	// TS order (web-server.ts:854-861): the extension guard runs first, then express.raw's
+	// application/octet-stream match, then the Buffer.isBuffer/empty check. A wrong content type
+	// therefore reads as "Empty image body.", not as the raw bytes.
 	if !isImportableImageExt(ext) {
 		showExt := ext
 		if showExt == "" {
@@ -69,6 +66,16 @@ func (s *server) importImageHandler(d DocumentWriteDeps, w http.ResponseWriter, 
 		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf(
 			"Unsupported image type '%s'. Accepted: %s", showExt, strings.Join(importableImageExtensions, ", ")))
+		return
+	}
+	if !isOctetStreamContentType(r.Header.Get("Content-Type")) {
+		writeError(w, http.StatusBadRequest, "Empty image body.")
+		return
+	}
+
+	body, status, message := readImportBody(r)
+	if status != 0 {
+		writeError(w, status, message)
 		return
 	}
 	if len(body) == 0 {
@@ -122,17 +129,10 @@ func (s *server) importImageHandler(d DocumentWriteDeps, w http.ResponseWriter, 
 	})
 }
 
-// readImportBody returns the raw upload body. The composed handler already read it (≤100 kB) into
-// the body context, so that value is preferred when present; otherwise the request body is read
-// directly, which is how a direct handler call (and the 64 MB unit test) reaches it. See package
-// comment gap 1: the composed 100 kB middleware cap is the reported limitation.
+// readImportBody returns the raw upload body read directly from the request. jsonBodyMiddleware
+// leaves non-JSON bodies unread (it no longer buffers every request), so this is the only place the
+// octet-stream upload is consumed, and the 64 MB cap mirrors express.raw({limit:'64mb'}).
 func readImportBody(r *http.Request) (data []byte, status int, message string) {
-	if raw, ok := r.Context().Value(bodyCtxKey{}).([]byte); ok {
-		if int64(len(raw)) > maxImportBytes {
-			return nil, http.StatusRequestEntityTooLarge, "request entity too large"
-		}
-		return raw, 0, ""
-	}
 	if r.Body == nil {
 		return nil, 0, ""
 	}
@@ -144,6 +144,13 @@ func readImportBody(r *http.Request) (data []byte, status int, message string) {
 		return nil, http.StatusRequestEntityTooLarge, "request entity too large"
 	}
 	return data, 0, ""
+}
+
+// isOctetStreamContentType is express.raw({type:'application/octet-stream'}): the media type must be
+// exactly application/octet-stream, case-insensitive, ignoring an optional parameters suffix.
+func isOctetStreamContentType(contentType string) bool {
+	mediaType := strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0])
+	return strings.EqualFold(mediaType, "application/octet-stream")
 }
 
 // sanitizeImportFilename is `path.basename(raw).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._-]+/, ”)`.

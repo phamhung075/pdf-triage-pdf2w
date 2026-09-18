@@ -71,13 +71,13 @@
 //
 // # Reported TS-vs-Go gaps
 //
-//  1. Raw image import body size. #27 is `express.raw({limit:'64mb'})` upstream, but part 1's
-//     jsonBodyMiddleware (server.go) reads EVERY request body once with a 100 kB cap before any
-//     handler runs and answers 413 above it. The import handler itself enforces the 64 MB cap
-//     (maxImportBytes) and is fully tested against it, but through the composed handler a real
-//     upload larger than 100 kB is rejected by that middleware first. Fixing this needs part 1's
-//     middleware to skip the raw route (the only edit this job is not allowed to make); the gap is
-//     reported to the orchestrator rather than silently worked around. See importImageHandler.
+//  1. Raw image import body size (RESOLVED). #27 is `express.raw({limit:'64mb'})` upstream, and part
+//     1's jsonBodyMiddleware now mirrors express.json exactly: it parses and caps ONLY
+//     `application/json` at 100 kB and leaves every other content type (the import's
+//     `application/octet-stream`) unread. The import handler reads that stream itself with the 64 MB
+//     cap (maxImportBytes), so a real upload larger than 100 kB reaches it instead of being rejected
+//     by the JSON middleware. A 5 MB composed import and a 64 MB + 1 rejection are pinned by
+//     TestImportImageRoute.
 //  2. triagescan.Result has no JSON tags. The frozen REST/SSE field names (scannedCount, ...) are
 //     produced by scanResultMap instead of marshaling the struct, the same treatment part 1 gave
 //     app/taskstate (server.go gap 3).

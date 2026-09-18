@@ -11,6 +11,7 @@ package httpapi
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/phamhung075/pdf-triage-pdf2w/documentschema"
@@ -53,7 +54,11 @@ func (s *server) getCategoriesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Dynamically include subcategories present in DB that are not yet in categories.json.
-		// Sorted for deterministic output; TS iterated the DB object's own key order.
+		// TS iterates Object.keys(subMap): the stats store returns a Go map with no order, so the
+		// order is reconstructed from the keys alone. SQLite's un-ORDERed GROUP BY emits rows
+		// ascending by (category, subcategory) — verified against the project's sqlite3 driver — so
+		// the JS object was built in ascending byte order, with JS's own-property rule that
+		// canonical integer-like keys come first in numeric order. See sortInjectedSubcategories.
 		injected := make([]string, 0, len(subMap))
 		for subID := range subMap {
 			if subID == "general" || taxonomy.IsYearString(subID) || seen[subID] {
@@ -61,7 +66,7 @@ func (s *server) getCategoriesHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			injected = append(injected, subID)
 		}
-		sort.Strings(injected)
+		sortInjectedSubcategories(injected)
 		for _, subID := range injected {
 			subcategories = append(subcategories, map[string]any{
 				"id":      subID,
@@ -102,7 +107,9 @@ func (s *server) putCategoriesHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// subcategoryView mirrors the TS `{ ...sub, count }`: only present optional fields are emitted.
+// subcategoryView mirrors the TS `{ ...sub, count }`: only fields present on the stored object are
+// emitted. In Go an omitted field is a nil slice while an explicit `[]` is a non-nil empty slice, so
+// `subcategories` is emitted only when the source had it — TS drops the key when it was undefined.
 func subcategoryView(sub *documentschema.SubcategoryItem) map[string]any {
 	view := map[string]any{"id": sub.ID, "name": sub.Name}
 	if sub.NameFR != nil {
@@ -112,13 +119,15 @@ func subcategoryView(sub *documentschema.SubcategoryItem) map[string]any {
 		view["name_en"] = *sub.NameEN
 	}
 	view["aliases"] = nonNilStrings(sub.Aliases)
-	nested := make([]any, 0, len(sub.Subcategories))
-	for _, child := range sub.Subcategories {
-		if child != nil {
-			nested = append(nested, subcategoryView(child))
+	if sub.Subcategories != nil {
+		nested := make([]any, 0, len(sub.Subcategories))
+		for _, child := range sub.Subcategories {
+			if child != nil {
+				nested = append(nested, subcategoryView(child))
+			}
 		}
+		view["subcategories"] = nested
 	}
-	view["subcategories"] = nested
 	return view
 }
 
@@ -154,6 +163,50 @@ func prettifySubID(slug string) string {
 		words[i] = strings.ToUpper(word[:1]) + word[1:]
 	}
 	return strings.Join(words, " ")
+}
+
+// sortInjectedSubcategories reproduces JS Object.keys() order for the stats object the TS built by
+// iterating SQLite's GROUP BY rows. The Go store returns a map, which loses that order, so it is
+// reconstructed from the keys under two documented facts:
+//
+//  1. SQLite's un-ORDERed `GROUP BY LOWER(category), LOWER(subcategory)` emits groups in ascending
+//     order of the grouping keys (verified with the project's sqlite3 driver for both a small
+//     scrambled insert and a 676-row set). Non-index keys therefore keep ascending byte order.
+//  2. A JS object lists canonical array-index property names first, in ascending numeric order,
+//     regardless of insertion order (e.g. Object.keys({10:1, 2:1, a:1}) === ['2','10','a']).
+func sortInjectedSubcategories(keys []string) {
+	sort.SliceStable(keys, func(i, j int) bool {
+		leftIndex, leftIsIndex := jsArrayIndex(keys[i])
+		rightIndex, rightIsIndex := jsArrayIndex(keys[j])
+		switch {
+		case leftIsIndex && rightIsIndex:
+			return leftIndex < rightIndex
+		case leftIsIndex:
+			return true
+		case rightIsIndex:
+			return false
+		default:
+			return keys[i] < keys[j]
+		}
+	})
+}
+
+// jsArrayIndex reports whether key is a canonical array index (a JS "integer index" property name):
+// a decimal string without a leading zero for an integer in [0, 2^32-2].
+func jsArrayIndex(key string) (uint64, bool) {
+	if key == "" || (len(key) > 1 && key[0] == '0') {
+		return 0, false
+	}
+	for i := 0; i < len(key); i++ {
+		if key[i] < '0' || key[i] > '9' {
+			return 0, false
+		}
+	}
+	value, err := strconv.ParseUint(key, 10, 64)
+	if err != nil || value > 4294967294 {
+		return 0, false
+	}
+	return value, true
 }
 
 // normalizeCategories replaces nil slices with the empty slices Zod's `.default([])` produces, so

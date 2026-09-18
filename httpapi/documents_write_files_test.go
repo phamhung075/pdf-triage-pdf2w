@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +89,7 @@ func TestImportImageRoute(t *testing.T) {
 		env.base.settings.cfg.InputDir = dir
 
 		req := httptest.NewRequest(http.MethodPost, "/api/images/import?filename=big.png", bytes.NewReader(make([]byte, maxImportBytes+1)))
+		req.Header.Set("Content-Type", "application/octet-stream")
 		rec := httptest.NewRecorder()
 		env.srv.importImageHandler(env.deps(), rec, req)
 		if rec.Code != http.StatusRequestEntityTooLarge {
@@ -98,13 +100,79 @@ func TestImportImageRoute(t *testing.T) {
 		}
 	})
 
-	t.Run("composed middleware still caps at 100 kB (reported gap 1)", func(t *testing.T) {
+	t.Run("imports a 5 MB octet-stream body through the composed server", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("allocates 5 MB")
+		}
 		env := newWriteEnv()
 		dir := t.TempDir()
 		env.base.settings.cfg.InputDir = dir
-		rec := doRaw(t, env.handler, "/api/images/import?filename=big.png", make([]byte, 101*1024))
+
+		payload := make([]byte, 5*1024*1024)
+		rec := doRaw(t, env.handler, "/api/images/import?filename=big.png", payload)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		info, err := os.Stat(filepath.Join(dir, "big.png"))
+		if err != nil {
+			t.Fatalf("imported file missing: %v", err)
+		}
+		if info.Size() != int64(len(payload)) {
+			t.Fatalf("size = %d, want %d", info.Size(), len(payload))
+		}
+	})
+
+	t.Run("rejects a 64 MB + 1 composed import", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("allocates 64 MB")
+		}
+		env := newWriteEnv()
+		dir := t.TempDir()
+		env.base.settings.cfg.InputDir = dir
+
+		rec := doRaw(t, env.handler, "/api/images/import?filename=big.png", make([]byte, maxImportBytes+1))
 		if rec.Code != http.StatusRequestEntityTooLarge {
-			t.Fatalf("status = %d, want the part-1 middleware 413", rec.Code)
+			t.Fatalf("status = %d, want 413", rec.Code)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Fatalf("imported despite oversize body: %d entries", len(entries))
+		}
+	})
+
+	t.Run("rejects a wrong content type with Empty image body", func(t *testing.T) {
+		for _, contentType := range []string{"application/json", "text/plain", "application/vnd.api+json"} {
+			env := newWriteEnv()
+			dir := t.TempDir()
+			env.base.settings.cfg.InputDir = dir
+
+			req := httptest.NewRequest(http.MethodPost, "/api/images/import?filename=photo.png", strings.NewReader(`{"a":1}`))
+			req.Header.Set("Content-Type", contentType)
+			rec := httptest.NewRecorder()
+			env.handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("%s: status = %d body=%s", contentType, rec.Code, rec.Body.String())
+			}
+			if body := decodeJSON(t, rec); body["error"] != "Empty image body." {
+				t.Fatalf("%s: error = %v", contentType, body["error"])
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+				t.Fatalf("%s: imported despite wrong content type: %d entries", contentType, len(entries))
+			}
+		}
+	})
+
+	t.Run("keeps the extension guard ahead of the content-type guard", func(t *testing.T) {
+		env := newWriteEnv()
+		env.base.settings.cfg.InputDir = t.TempDir()
+		req := httptest.NewRequest(http.MethodPost, "/api/images/import?filename=evil.exe", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		env.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		if body := decodeJSON(t, rec); !strings.Contains(body["error"].(string), "Unsupported image type") {
+			t.Fatalf("error = %v", body["error"])
 		}
 	})
 }

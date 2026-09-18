@@ -146,6 +146,68 @@ func TestGetCategories(t *testing.T) {
 			t.Fatalf("subcategories = %v, want none", subs)
 		}
 	})
+
+	t.Run("injected DB-only subcategories keep the TS Object.keys order", func(t *testing.T) {
+		env := newTestEnv()
+		env.cats.cfg = documentschema.CategoriesConfig{Categories: []*documentschema.CategoryItem{
+			{ID: "invoices", Name: "Factures", Description: "", Aliases: []string{}, Subcategories: []*documentschema.SubcategoryItem{}},
+		}}
+		env.db.stats = database.CategoryStats{
+			Total:             6,
+			CategoryCounts:    map[string]int{"invoices": 6},
+			SubcategoryCounts: map[string]map[string]int{"invoices": {"zeta": 1, "alpha": 2, "mike": 3, "general": 1, "2026": 1}},
+		}
+		rec := doJSON(t, env.handler, http.MethodGet, "/api/categories", nil, nil)
+		invoices := findCategory(t, decodeJSON(t, rec), "invoices")
+		var ids []string
+		for _, raw := range invoices["subcategories"].([]any) {
+			ids = append(ids, raw.(map[string]any)["id"].(string))
+		}
+		if strings.Join(ids, ",") != "alpha,mike,zeta" {
+			t.Fatalf("injected order = %v, want alpha,mike,zeta", ids)
+		}
+	})
+
+	t.Run("integer-like injected ids keep the JS numeric-first order", func(t *testing.T) {
+		env := newTestEnv()
+		env.cats.cfg = documentschema.CategoriesConfig{Categories: []*documentschema.CategoryItem{
+			{ID: "invoices", Name: "Factures", Description: "", Aliases: []string{}, Subcategories: []*documentschema.SubcategoryItem{}},
+		}}
+		env.db.stats = database.CategoryStats{
+			Total:             3,
+			CategoryCounts:    map[string]int{"invoices": 3},
+			SubcategoryCounts: map[string]map[string]int{"invoices": {"10": 1, "2": 1, "alpha": 1}},
+		}
+		rec := doJSON(t, env.handler, http.MethodGet, "/api/categories", nil, nil)
+		invoices := findCategory(t, decodeJSON(t, rec), "invoices")
+		var ids []string
+		for _, raw := range invoices["subcategories"].([]any) {
+			ids = append(ids, raw.(map[string]any)["id"].(string))
+		}
+		if strings.Join(ids, ",") != "2,10,alpha" {
+			t.Fatalf("injected order = %v, want 2,10,alpha", ids)
+		}
+	})
+
+	t.Run("configured subcategories omit the subcategories key when the source omitted it", func(t *testing.T) {
+		env := newTestEnv()
+		env.cats.cfg = documentschema.CategoriesConfig{Categories: []*documentschema.CategoryItem{
+			{ID: "invoices", Name: "Factures", Description: "", Aliases: []string{}, Subcategories: []*documentschema.SubcategoryItem{
+				{ID: "sfr", Name: "SFR", Aliases: []string{}}, // nil Subcategories: TS `{...sub}` drops the key
+				{ID: "edf", Name: "EDF", Aliases: []string{}, Subcategories: []*documentschema.SubcategoryItem{}},
+			}},
+		}}
+		rec := doJSON(t, env.handler, http.MethodGet, "/api/categories", nil, nil)
+		invoices := findCategory(t, decodeJSON(t, rec), "invoices")
+		subs := invoices["subcategories"].([]any)
+		if sfr := findSubcategory(t, subs, "sfr"); func() bool { _, ok := sfr["subcategories"]; return ok }() {
+			t.Fatalf("sfr gained a subcategories key: %v", sfr)
+		}
+		edf := findSubcategory(t, subs, "edf")
+		if _, ok := edf["subcategories"]; !ok {
+			t.Fatalf("edf lost its explicit empty subcategories key: %v", edf)
+		}
+	})
 }
 
 func findCategory(t *testing.T, body map[string]any, id string) map[string]any {
@@ -493,6 +555,29 @@ func TestLogsRoutes(t *testing.T) {
 		body := decodeJSON(t, doJSON(t, env.handler, http.MethodGet, "/api/logs/recent", nil, nil))
 		if len(body["logs"].([]any)) != 1 {
 			t.Fatalf("logs = %v", body["logs"])
+		}
+	})
+
+	t.Run("non-numeric limit follows parseInt NaN semantics (whole buffer)", func(t *testing.T) {
+		// TS getRecentLogs(NaN) is logBuffer.slice(-NaN) === slice(0) === every buffered entry, so
+		// `?limit=abc` must not fall back to the 300 default. The real logger is used so the
+		// response body length is the observable proof, not just the limit forwarded.
+		env := newTestEnv()
+		realLogger := logger.New(logger.Options{LogDir: t.TempDir(), MaxBuffer: 10, Stdout: io.Discard, Stderr: io.Discard})
+		for i := 0; i < 5; i++ {
+			realLogger.Info("TEST", "entry", nil)
+		}
+		deps := testDeps(env)
+		deps.Logs = realLogger
+		env.handler = NewServer(deps)
+
+		all := decodeJSON(t, doJSON(t, env.handler, http.MethodGet, "/api/logs/recent?limit=abc", nil, nil))
+		if got := len(all["logs"].([]any)); got != 5 {
+			t.Fatalf("NaN limit returned %d logs, want all 5", got)
+		}
+		truncated := decodeJSON(t, doJSON(t, env.handler, http.MethodGet, "/api/logs/recent?limit=2", nil, nil))
+		if got := len(truncated["logs"].([]any)); got != 2 {
+			t.Fatalf("limit=2 returned %d logs, want 2", got)
 		}
 	})
 

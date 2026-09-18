@@ -4,10 +4,10 @@ package httpapi
 import (
 	"io/fs"
 	"math"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -275,8 +275,37 @@ func formatBytes(bytes int64) string {
 		i = len(sizes) - 1
 	}
 	value := float64(bytes) / math.Pow(k, float64(i))
-	text := strconv.FormatFloat(value, 'f', 2, 64)
-	text = strings.TrimRight(text, "0")
+	text := strings.TrimRight(jsToFixed2(value), "0")
 	text = strings.TrimRight(text, ".")
 	return text + " " + sizes[i]
+}
+
+// jsToFixed2 is Number.prototype.toFixed(2) for the finite non-negative doubles formatBytes
+// produces. ECMAScript rounds the double's EXACT mathematical value to two fraction digits and, on
+// an exact tie, picks the larger result; strconv.FormatFloat rounds ties to even instead, so it
+// prints 0.125 as "0.12" where JS prints "0.13". math/big keeps the double's exact dyadic value, so
+// the tie is detected rather than hidden by the shortest-decimal representation. The expected
+// outputs are pinned by TestFormatBytesJSToFixed from a node -e run of the real TS function.
+func jsToFixed2(value float64) string {
+	rational := new(big.Rat).SetFloat64(value)
+	if rational == nil {
+		return "NaN" // NaN / ±Inf never reach formatBytes
+	}
+	negative := rational.Sign() < 0
+	if negative {
+		rational.Neg(rational)
+	}
+	scaled := rational.Mul(rational, big.NewRat(100, 1))
+	// floor(scaled + 1/2): an exact tie goes to the larger integer, matching ECMAScript.
+	scaled = scaled.Add(scaled, big.NewRat(1, 2))
+	integer := new(big.Int).Quo(scaled.Num(), scaled.Denom())
+	digits := integer.String()
+	if len(digits) < 3 {
+		digits = strings.Repeat("0", 3-len(digits)) + digits
+	}
+	text := digits[:len(digits)-2] + "." + digits[len(digits)-2:]
+	if negative {
+		text = "-" + text
+	}
+	return text
 }

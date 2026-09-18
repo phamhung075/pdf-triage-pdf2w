@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/phamhung075/pdf-triage-pdf2w/app/relocalize"
@@ -127,6 +128,36 @@ func TestPutDocumentRoute(t *testing.T) {
 		relocalizeIdx := env.order.indexOf("relocalize")
 		if saveIdx == -1 || relocalizeIdx == -1 || saveIdx > relocalizeIdx {
 			t.Fatalf("order = %v, want save before relocalize", env.order.steps)
+		}
+	})
+
+	t.Run("does not relocalize when the document has no new_path (upstream case 15)", func(t *testing.T) {
+		env := newWriteEnv()
+		env.db.docs[1] = samplePutDoc() // NewPath is empty: the physical branch must be skipped.
+		rec := doJSON(t, env.handler, http.MethodPut, "/api/documents/1", map[string]any{"category": "bank", "subcategory": "bnp_paribas"}, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		if env.reloc.relocalizeCalls != 0 {
+			t.Fatalf("relocalize called %d times, want 0", env.reloc.relocalizeCalls)
+		}
+	})
+
+	t.Run("broadcasts REGISTRY_UPDATED/EDIT over SSE (upstream case 19)", func(t *testing.T) {
+		env := newWriteEnv()
+		env.db.docs[1] = samplePutDoc()
+		_, reader, closeFn := connectTriageSSE(t, env)
+		defer closeFn()
+
+		rec := doJSON(t, env.handler, http.MethodPut, "/api/documents/1", map[string]any{"summary": "edited"}, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		frame := readSSEFrame(t, reader)
+		if !strings.Contains(frame, `"type":"REGISTRY_UPDATED"`) ||
+			!strings.Contains(frame, `"action":"EDIT"`) ||
+			!strings.Contains(frame, `"docId":1`) {
+			t.Fatalf("frame = %q", frame)
 		}
 	})
 }
