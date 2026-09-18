@@ -221,6 +221,11 @@ type Deps struct {
 	// RestartDelay is how long POST /api/server/restart waits before calling Exit, matching the TS
 	// setTimeout(..., 500). Tests set it to a small value; 0 means the 500 ms default.
 	RestartDelay time.Duration
+	// RouteGroups are the per-server route-group registrations. Each is called once per NewServer
+	// with the server under construction, so it can register its routes on s.mux. A group closes
+	// over its own dependency struct, keeping that group's collaborators out of Deps; nil entries
+	// are skipped.
+	RouteGroups []RouteGroup
 }
 
 // server carries the mutable route guards that web-server.ts held as closure variables:
@@ -281,6 +286,14 @@ func newServer(deps Deps) *server {
 	// file adds itself from its init function without editing this function.
 	for _, hook := range routeGroupHooks {
 		hook(s)
+	}
+
+	// Route groups injected through Deps register after the hooks, one call each, so a caller can
+	// add routes with their own collaborators without editing Deps. Nil entries are skipped.
+	for _, group := range deps.RouteGroups {
+		if group != nil {
+			group(s)
+		}
 	}
 
 	// Static public/ is mounted last and only when the directory exists, exactly like

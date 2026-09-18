@@ -5,6 +5,10 @@ package httpapi
 // definition or the existing register* methods.
 type Server = server
 
+// RouteGroup is a route group that registers its routes on s.mux when NewServer runs it. A group
+// closes over its own dependency struct, so a group's collaborators never appear in Deps.
+type RouteGroup func(*Server)
+
 // routeGroupHooks collects the self-registration hooks contributed by route-group files. A route
 // group lives in its own file and appends its registration method from an init function, so adding
 // a route group never requires editing server.go:
