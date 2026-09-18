@@ -229,6 +229,9 @@ type server struct {
 	deps    Deps
 	hub     *Hub
 	handler http.Handler
+	// mux is the route table. routeGroupHooks receive the server after the built-in register*
+	// calls and add their routes here.
+	mux *http.ServeMux
 	// isAutoScanning is the shared guard read/written by POST /api/triage/unlock here and by the
 	// later job's scan/repair/clear routes. It is atomic because Go handlers are concurrent.
 	isAutoScanning bool
@@ -262,6 +265,7 @@ func newServer(deps Deps) *server {
 	}
 
 	mux := http.NewServeMux()
+	s.mux = mux
 	s.registerLiveReload(mux)
 	s.registerOpenLocation(mux)
 	s.registerOpenChrome(mux)
@@ -272,6 +276,12 @@ func newServer(deps Deps) *server {
 	s.registerBlockedFiles(mux)
 	s.registerManualDecisions(mux)
 	s.registerTriage(mux)
+
+	// Route-group hooks register after the built-in groups, in slice order, so a new route-group
+	// file adds itself from its init function without editing this function.
+	for _, hook := range routeGroupHooks {
+		hook(s)
+	}
 
 	// Static public/ is mounted last and only when the directory exists, exactly like
 	// web-server.ts:71-80. "/" is the least specific pattern, so it never shadows an API route.
