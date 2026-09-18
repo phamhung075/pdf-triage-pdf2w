@@ -40,6 +40,24 @@ func TestCanonicalPathHandler(t *testing.T) {
 	}
 }
 
+func TestCleanTextHandler(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"text": "Hello\x00World\r\n\r\n\r\n\r\nMore text here"})
+	req := httptest.NewRequest(http.MethodPost, "/clean-text", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	cleanTextHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON response: %v", err)
+	}
+	if resp["text"] != "HelloWorld\n\nMore text here" {
+		t.Fatalf("got %q", resp["text"])
+	}
+}
+
 func TestHealthHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()

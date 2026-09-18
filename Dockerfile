@@ -2,6 +2,7 @@ FROM golang:1.23-alpine AS build
 WORKDIR /app
 COPY go.mod ./
 COPY canonicalpath/ ./canonicalpath/
+COPY cleantext/ ./cleantext/
 COPY cmd/ ./cmd/
 RUN go build -o /pdf-triage-pdf2w ./cmd/server
 
