@@ -11,7 +11,7 @@ all: build
 ## dev: run server directly from source with change on save (air or go run)
 dev:
 	@mkdir -p tmp
-	@PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-..}" $(AIR) || PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-..}" $(GO) run $(CMD) serve
+	@PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-$$(cd .. && pwd)}" $(AIR) || PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-$$(cd .. && pwd)}" $(GO) run $(CMD) serve
 
 ## build: static binary for the host platform.
 build:

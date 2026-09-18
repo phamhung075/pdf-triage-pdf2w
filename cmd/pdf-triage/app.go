@@ -83,22 +83,48 @@ type application struct {
 	closeOnce sync.Once
 }
 
+// findBaseDir resolves the project root containing public/ and settings/categories.
+// It checks explicit, PDF_TRIAGE_BASE_DIR, working directory, and parent directories.
+func findBaseDir(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if v := os.Getenv("PDF_TRIAGE_BASE_DIR"); v != "" {
+		return v
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	if hasPublicDir(wd) {
+		return wd
+	}
+	parent := filepath.Clean(filepath.Join(wd, ".."))
+	if hasPublicDir(parent) {
+		return parent
+	}
+	grandparent := filepath.Clean(filepath.Join(wd, "..", ".."))
+	if hasPublicDir(grandparent) {
+		return grandparent
+	}
+	return wd
+}
+
+func hasPublicDir(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, "public"))
+	return err == nil && info.IsDir()
+}
+
 // newApplication builds the whole dependency graph. The settings store is created first because
 // every path derives from it; a failure to create it (or to open the SQLite database) is fatal.
 func newApplication(opts appOptions) (*application, error) {
-	baseDir := opts.BaseDir
-	if baseDir == "" {
-		workingDir, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("pdf-triage: resolve working directory: %w", err)
-		}
-		baseDir = workingDir
-	}
+	baseDir := findBaseDir(opts.BaseDir)
 
 	settingsStore, err := settings.New(settings.Options{BaseDir: baseDir, DataDir: opts.DataDir})
 	if err != nil {
 		return nil, err
 	}
+	baseDir = settingsStore.BaseDir()
 	cfg := settingsStore.Config()
 	dataDir := settingsStore.DataDir()
 
