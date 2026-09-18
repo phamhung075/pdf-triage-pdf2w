@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "inputImageBase64 (string) is required"
+  }
+}

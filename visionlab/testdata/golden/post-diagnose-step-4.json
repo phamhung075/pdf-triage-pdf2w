@@ -1,0 +1,7 @@
+{
+  "status": 400,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "step must be 1, 2, or 3 (step 4 is retired)"
+  }
+}

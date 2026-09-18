@@ -1,0 +1,7 @@
+{
+  "status": 500,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "error": "unexpected crash"
+  }
+}

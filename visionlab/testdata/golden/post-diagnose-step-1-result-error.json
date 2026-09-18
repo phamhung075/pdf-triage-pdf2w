@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "result": {
+      "step": 1,
+      "label": "oriented",
+      "imageBase64": "",
+      "durationMs": 5,
+      "error": "model unreachable"
+    }
+  }
+}

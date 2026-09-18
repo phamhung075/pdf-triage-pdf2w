@@ -1,0 +1,12 @@
+{
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": {
+    "result": {
+      "step": 3,
+      "label": "enhanced",
+      "imageBase64": "abc",
+      "durationMs": 5
+    }
+  }
+}
