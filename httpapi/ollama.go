@@ -251,29 +251,35 @@ func (s *server) aiTestHandler(w http.ResponseWriter, r *http.Request) {
 		if model == "" {
 			model = cfg.OllamaModel
 		}
+		start := time.Now()
 		health := s.deps.Ollama.CheckModelCanGenerate(model, true)
+		latency := time.Since(start).Milliseconds()
 		if !health.OK {
-			writeJSON(w, 200, map[string]any{"ok": false, "error": health.Error})
+			writeJSON(w, 200, map[string]any{"ok": false, "error": health.Error, "latency_ms": latency})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true, "message": "Ollama is online and model " + model + " can generate"})
+		writeJSON(w, 200, map[string]any{"ok": true, "message": "Ollama is online and model " + model + " can generate", "latency_ms": latency})
 		return
 	default:
 		writeError(w, 400, "unknown AI provider: "+providerName)
 		return
 	}
 
+	start := time.Now()
 	res, err := prov.Test(ctx)
+	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, 200, map[string]any{
-			"ok":    false,
-			"error": err.Error(),
+			"ok":         false,
+			"error":      err.Error(),
+			"latency_ms": latency,
 		})
 		return
 	}
 
 	writeJSON(w, 200, map[string]any{
-		"ok":      true,
-		"message": fmt.Sprintf("Successfully connected to %s! Test response: %s", prov.Name(), strings.TrimSpace(res)),
+		"ok":         true,
+		"message":    fmt.Sprintf("Successfully connected to %s! Test response: %s", prov.Name(), strings.TrimSpace(res)),
+		"latency_ms": latency,
 	})
 }

@@ -571,7 +571,6 @@ func ensurePdf2wService(serviceURL, baseDir string, log *logger.Logger) {
 	candidates := []string{
 		os.Getenv("PDF2MD_SERVER_BIN"),
 		filepath.Join(baseDir, "..", "markdown-extract-service", "public", "server", "bin", "pdf2md-server"),
-		"/home/daihu/__projects__/markdown-extract-service/public/server/bin/pdf2md-server",
 		filepath.Join(baseDir, "bin", "pdf2md-server"),
 	}
 

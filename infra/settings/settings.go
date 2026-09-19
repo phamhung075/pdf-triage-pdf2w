@@ -452,7 +452,7 @@ func (s *Store) UpdateConfig(patch UpdateSettings) error {
 	if err != nil {
 		return err
 	}
-	if err := writeFileAtomic(s.settingsFile, payload, 0o644); err != nil {
+	if err := writeFileAtomic(s.settingsFile, payload, 0o600); err != nil {
 		return err
 	}
 	return EnsureDirectoriesExist(cfg)

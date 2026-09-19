@@ -278,6 +278,15 @@ func TestUpdateConfig(t *testing.T) {
 		if _, err := os.Stat(st.SettingsFile() + ".tmp"); !os.IsNotExist(err) {
 			t.Fatalf(".tmp left behind after atomic write, stat err = %v", err)
 		}
+		if runtime.GOOS != "windows" {
+			info, err := os.Stat(st.SettingsFile())
+			if err != nil {
+				t.Fatalf("Stat: %v", err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Fatalf("settings.json mode = %o, want 0600", got)
+			}
+		}
 	})
 }
 

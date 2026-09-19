@@ -663,6 +663,82 @@ func TestOllamaRoutes(t *testing.T) {
 	})
 }
 
+// TestAITestLatency pins the dashboard contract: POST /api/ai/test must always include an
+// integer latency_ms (>= 0), which ModalsManager reads as "Connected (Nms)". The local
+// provider path is exercised so the existing fakeOllama stands in for the network.
+func TestAITestLatency(t *testing.T) {
+	assertLatency := func(t *testing.T, body map[string]any) {
+		t.Helper()
+		raw, ok := body["latency_ms"]
+		if !ok {
+			t.Fatalf("latency_ms missing from response: %v", body)
+		}
+		n, ok := raw.(float64)
+		if !ok {
+			t.Fatalf("latency_ms = %v (%T), want a JSON number", raw, raw)
+		}
+		if n < 0 || n != float64(int64(n)) {
+			t.Fatalf("latency_ms = %v, want a non-negative integer", raw)
+		}
+	}
+
+	t.Run("local success", func(t *testing.T) {
+		env := newTestEnv()
+		env.ollama.health = ollama.ModelHealth{OK: true}
+		rec := doJSON(t, env.handler, http.MethodPost, "/api/ai/test", map[string]string{"provider": "local"}, nil)
+		body := decodeJSON(t, rec)
+		if rec.Code != 200 || body["ok"] != true {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		assertLatency(t, body)
+	})
+
+	t.Run("local failure", func(t *testing.T) {
+		env := newTestEnv()
+		env.ollama.health = ollama.ModelHealth{OK: false, Error: "model not found"}
+		rec := doJSON(t, env.handler, http.MethodPost, "/api/ai/test", map[string]string{"provider": "local"}, nil)
+		body := decodeJSON(t, rec)
+		if rec.Code != 200 || body["ok"] != false {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		assertLatency(t, body)
+	})
+
+	// Cloud providers are exercised against an in-process httptest server (loopback only).
+	t.Run("cloud success", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}`))
+		}))
+		defer upstream.Close()
+		env := newTestEnv()
+		rec := doJSON(t, env.handler, http.MethodPost, "/api/ai/test", map[string]string{
+			"provider": "google", "api_key": "test-key", "model": "gemini-2.5-flash", "base_url": upstream.URL,
+		}, nil)
+		body := decodeJSON(t, rec)
+		if rec.Code != 200 || body["ok"] != true {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		assertLatency(t, body)
+	})
+
+	t.Run("cloud failure", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		defer upstream.Close()
+		env := newTestEnv()
+		rec := doJSON(t, env.handler, http.MethodPost, "/api/ai/test", map[string]string{
+			"provider": "google", "api_key": "test-key", "model": "gemini-2.5-flash", "base_url": upstream.URL,
+		}, nil)
+		body := decodeJSON(t, rec)
+		if rec.Code != 200 || body["ok"] != false {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		assertLatency(t, body)
+	})
+}
+
 // TestServerRestart ports POST /api/server/restart: respond first, then exit.
 func TestServerRestart(t *testing.T) {
 	env := newTestEnv()
