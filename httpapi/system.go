@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phamhung075/pdf-triage-pdf2w/documentschema"
@@ -134,13 +135,99 @@ func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// systemStatsCacheTTL is how long a computed (raws, archive) directory-stats pair is served before
+// the next request walks the two trees again. Those trees live on a slow 9p/OneDrive mount, so a
+// repeat Settings-modal call must not pay the ~3.5 s walk again; 30 s is the accepted staleness
+// window after a scan, and no cache-invalidation wiring is added to scan/relocalize/clear.
+const systemStatsCacheTTL = 30 * time.Second
+
+// systemStatsNow and systemStatsWalk are package-level seams that let the cache tests substitute a
+// fake clock and a counting walker without touching exported API. Tests save the originals and
+// restore them in t.Cleanup; production never reassigns them.
+//
+// The preferred home for the cache itself is a field on server, but this job's change scope covers
+// only httpapi/system.go and its test file while server is declared in server.go. The per-server
+// state therefore lives in the package-level sync.Map below, keyed by *server: every server still
+// gets its own independent cache and mutex, so the behavior is identical.
+var (
+	systemStatsNow  = time.Now
+	systemStatsWalk = getDirStats
+)
+
+// systemStatsEntry is one server's cached walk result plus the directory key and timestamp that
+// decide whether it is still fresh.
+type systemStatsEntry struct {
+	mu          sync.Mutex
+	initialized bool
+	inputDir    string
+	outputRoot  string
+	computedAt  time.Time
+	raw         dirStats
+	archive     dirStats
+}
+
+// systemStatsEntries maps a *server to its cache entry. sync.Map because handlers run concurrently
+// and each server's entry is created lazily on its first request.
+var systemStatsEntries sync.Map
+
+func (s *server) systemStatsEntry() *systemStatsEntry {
+	if v, ok := systemStatsEntries.Load(s); ok {
+		return v.(*systemStatsEntry)
+	}
+	entry := &systemStatsEntry{}
+	actual, _ := systemStatsEntries.LoadOrStore(s, entry)
+	return actual.(*systemStatsEntry)
+}
+
+// cachedDirStats returns the (raws, archive) pair. It serves the cached value while it is fresh and
+// its directory key still matches, and otherwise recomputes under the entry's mutex so a concurrent
+// miss walks each tree only once (single flight: waiters block, then hit the just-refreshed cache).
+func (s *server) cachedDirStats(inputDir, outputRoot string) (dirStats, dirStats) {
+	entry := s.systemStatsEntry()
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.initialized && entry.inputDir == inputDir && entry.outputRoot == outputRoot &&
+		systemStatsNow().Sub(entry.computedAt) < systemStatsCacheTTL {
+		return entry.raw, entry.archive
+	}
+
+	entry.raw, entry.archive = walkDirStatsPair(inputDir, outputRoot)
+	entry.initialized = true
+	entry.inputDir = inputDir
+	entry.outputRoot = outputRoot
+	entry.computedAt = systemStatsNow()
+	return entry.raw, entry.archive
+}
+
+// walkDirStatsPair walks the two trees concurrently, each goroutine writing its own result value.
+func walkDirStatsPair(inputDir, outputRoot string) (dirStats, dirStats) {
+	var (
+		wg      sync.WaitGroup
+		raw     dirStats
+		archive dirStats
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		raw = systemStatsWalk(inputDir)
+	}()
+	go func() {
+		defer wg.Done()
+		archive = systemStatsWalk(outputRoot)
+	}()
+	wg.Wait()
+	return raw, archive
+}
+
 // systemStatsHandler ports web-server.ts:330-419 verbatim, including the format buckets and the
 // parseFloat(toFixed(2)) size formatting.
 func (s *server) systemStatsHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := s.deps.Settings.Config()
 
-	rawStats := getDirStats(cfg.InputDir)
-	archiveStats := getDirStats(cfg.OutputRootDir)
+	// The directory walks are cached for systemStatsCacheTTL; the DB size below is a fresh stat on
+	// every request.
+	rawStats, archiveStats := s.cachedDirStats(cfg.InputDir, cfg.OutputRootDir)
 
 	var dbBytes int64
 	if info, err := os.Stat(cfg.DBPath); err == nil {
