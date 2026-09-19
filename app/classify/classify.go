@@ -82,6 +82,7 @@ import (
 	"github.com/phamhung075/pdf-triage-pdf2w/classification"
 	"github.com/phamhung075/pdf-triage-pdf2w/classificationresolution"
 	"github.com/phamhung075/pdf-triage-pdf2w/documentschema"
+	"github.com/phamhung075/pdf-triage-pdf2w/infra/aiprovider"
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/logger"
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/ollama"
 	"github.com/phamhung075/pdf-triage-pdf2w/prompt"
@@ -143,6 +144,10 @@ type Config struct {
 	OllamaHost           string
 	Language             string
 	PersonalNameDenylist []string
+	AIProvider           string
+	CloudProvider        string
+	CloudModel           string
+	GetConfig            func() Config
 }
 
 // Deps is the explicit injected surface. See the package comment.
@@ -168,20 +173,81 @@ var (
 	_ Logger                = (*logger.Logger)(nil)
 )
 
+func (d Deps) effectiveConfig() Config {
+	if d.Config.GetConfig != nil {
+		return d.Config.GetConfig()
+	}
+	return d.Config
+}
+
+func (d Deps) aiInfo() (moduleTag, providerName, modelName string) {
+	cfg := d.effectiveConfig()
+	if strings.EqualFold(cfg.AIProvider, "cloud") {
+		canonical, ok := aiprovider.NormalizeCloud(cfg.CloudProvider)
+		if !ok {
+			if strings.TrimSpace(cfg.CloudProvider) != "" {
+				// Unknown non-empty provider: label it generically rather than claiming Gemini.
+				return "CLOUD_AI", "Cloud AI", cfg.CloudModel
+			}
+			canonical = "google"
+		}
+		model := cfg.CloudModel
+		if model == "" {
+			switch canonical {
+			case "deepseek":
+				model = "deepseek-chat"
+			case "claude":
+				model = "claude-3-7-sonnet-20250219"
+			case "openai":
+				model = "gpt-4o-mini"
+			default:
+				model = "gemini-2.5-flash"
+			}
+		}
+		switch canonical {
+		case "deepseek":
+			return "DEEPSEEK_AI", "DeepSeek", model
+		case "google":
+			return "GEMINI_AI", "Google Gemini", model
+		case "claude":
+			return "CLAUDE_AI", "Anthropic Claude", model
+		case "openai":
+			return "OPENAI_AI", "OpenAI", model
+		}
+		return "CLOUD_AI", "Cloud AI", model
+	}
+	model := cfg.OllamaModel
+	if model == "" {
+		model = "qwen3.5:9b"
+	}
+	return moduleOllamaAI, "Ollama", model
+}
+
+func (d Deps) logModule() string {
+	tag, _, _ := d.aiInfo()
+	return tag
+}
+
 func (d Deps) debug(message string, meta map[string]any) {
 	if d.Log != nil {
-		d.Log.Debug(moduleOllamaAI, message, meta)
+		d.Log.Debug(d.logModule(), message, meta)
 	}
 }
 
 func (d Deps) info(module, message string, meta map[string]any) {
 	if d.Log != nil {
+		if module == moduleOllamaAI {
+			module = d.logModule()
+		}
 		d.Log.Info(module, message, meta)
 	}
 }
 
 func (d Deps) warn(module, message string, meta map[string]any) {
 	if d.Log != nil {
+		if module == moduleOllamaAI {
+			module = d.logModule()
+		}
 		d.Log.Warn(module, message, meta)
 	}
 }
@@ -190,7 +256,8 @@ func (d Deps) warn(module, message string, meta map[string]any) {
 // premade Markdown supplied by the extractor; when non-blank Step C is skipped. previousError is the
 // TS optional retry feedback. A zero `now` is the TS default `new Date()`.
 func (d Deps) ClassifyPDFText(rawText, filename, previousError string, now time.Time, doclingMarkdown string) (documentschema.DocumentMetadata, error) {
-	modelHealthy := d.Ollama.EnsureOllamaModel(d.Config.OllamaModel)
+	_, aiProviderName, aiModelName := d.aiInfo()
+	modelHealthy := d.Ollama.EnsureOllamaModel(aiModelName)
 
 	categoriesConfig := d.Categories.GetCategoriesConfig()
 	dictionary := d.EntityDictionary.GetEntityDictionary()
@@ -204,8 +271,8 @@ func (d Deps) ClassifyPDFText(rawText, filename, previousError string, now time.
 	}
 
 	var validated documentschema.DocumentMetadata
-	decisionMethod := "Modular Ollama AI Pipeline — Step A (entity) + Step C (markdown) + Step D (classification), qwen3.5:9b"
-	decisionReason := "Analyzed via Step A entity extraction + Step C markdown conversion + Step D classification"
+	decisionMethod := fmt.Sprintf("Modular %s AI Pipeline — Step A (entity) + Step C (markdown) + Step D (classification), %s", aiProviderName, aiModelName)
+	decisionReason := fmt.Sprintf("Analyzed via %s Step A entity extraction + Step C markdown conversion + Step D classification", aiProviderName)
 	extractedEntity := ""
 	extractedDocType := ""
 
@@ -216,8 +283,8 @@ func (d Deps) ClassifyPDFText(rawText, filename, previousError string, now time.
 			// fallback exists for a healthy model's unparseable JSON, not for an unreachable one.
 			// Propagate so the caller blocks the file in __raws and reminds the user to start Ollama.
 			return &ollama.OllamaUnavailableError{Message: fmt.Sprintf(
-				"Ollama is down — model '%s' failed the capability check (%s). Start Ollama, then re-scan. No documents were triaged.",
-				d.Config.OllamaModel, d.Config.OllamaHost,
+				"%s is down — model '%s' failed the capability check (%s). Start %s, then re-scan. No documents were triaged.",
+				aiProviderName, aiModelName, d.effectiveConfig().OllamaHost, aiProviderName,
 			)}
 		}
 
@@ -310,7 +377,7 @@ func (d Deps) ClassifyPDFText(rawText, filename, previousError string, now time.
 
 		rawCategorie := jsonStringField(parsedD, "categorie")
 		rawSubcategorie := jsonStringField(parsedD, "subcategorie")
-		d.info(moduleOllamaAI, fmt.Sprintf(`[STEP D] Raw classification from Ollama for %s: categorie="%s", subcategorie="%s"`, filename, rawCategorie, rawSubcategorie), map[string]any{
+		d.info(moduleOllamaAI, fmt.Sprintf(`[STEP D] Raw classification from %s for %s: categorie="%s", subcategorie="%s"`, aiProviderName, filename, rawCategorie, rawSubcategorie), map[string]any{
 			"filename": filename, "rawCategorie": rawCategorie, "rawSubcategorie": rawSubcategorie,
 			"thinking": truncateForLog(firstNonEmpty(resD.Thinking, jsonStringField(parsedD, "thinking"))),
 		})
@@ -349,7 +416,7 @@ func (d Deps) ClassifyPDFText(rawText, filename, previousError string, now time.
 		decisionMethod = "Rule-Based Pattern Classifier"
 		rb := classification.RuleBasedClassify(rawText, filename, dictionary, d.Config.PersonalNameDenylist, personalization)
 		decisionReason = "Rule-Based fallback: " + rb.Reason
-		d.warn(moduleOllamaAI, fmt.Sprintf("Ollama AI request failed for %s: %s. %s", filename, pipelineErr.Error(), decisionReason), nil)
+		d.warn(moduleOllamaAI, fmt.Sprintf("%s AI request failed for %s: %s. %s", aiProviderName, filename, pipelineErr.Error(), decisionReason), nil)
 		validated = documentschema.DocumentMetadata{
 			Titre:           rb.Title,
 			Registre:        "",

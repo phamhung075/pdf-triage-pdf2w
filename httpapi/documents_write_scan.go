@@ -141,9 +141,9 @@ func applyRepairProgress(tasks DocumentWriteTasks, event any) {
 			Message:        &message,
 		})
 	case repair.FileProgressEvent:
-		count := evt.ScannedCount
+		count := evt.ProcessedCount
 		if count == 0 {
-			count = evt.ProcessedCount
+			count = evt.ScannedCount
 		}
 		update := taskstate.ProgressUpdate{ProcessedFiles: count}
 		filename, stage, message := evt.Filename, evt.Stage, evt.Message

@@ -86,14 +86,57 @@ func (s *server) setupStateHandler(w http.ResponseWriter, r *http.Request) {
 // getConfigHandler ports web-server.ts:314-327.
 func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := s.deps.Settings.Config()
-	writeJSON(w, 200, map[string]any{
+	resp := map[string]any{
 		"language":               cfg.Language,
 		"input_dir":              cfg.InputDir,
 		"output_root_dir":        cfg.OutputRootDir,
 		"ollama_model":           cfg.OllamaModel,
 		"ollama_host":            cfg.OllamaHost,
 		"personal_name_denylist": cfg.PersonalNameDenylist,
-	})
+	}
+	if cfg.AIProvider != "" {
+		resp["ai_provider"] = cfg.AIProvider
+	}
+	if cfg.CloudProvider != "" {
+		resp["cloud_provider"] = cfg.CloudProvider
+	}
+	if cfg.GoogleAPIKey != "" {
+		resp["google_api_key"] = cfg.GoogleAPIKey
+	}
+	if cfg.GoogleModel != "" {
+		resp["google_model"] = cfg.GoogleModel
+	}
+	if cfg.GoogleBaseURL != "" {
+		resp["google_base_url"] = cfg.GoogleBaseURL
+	}
+	if cfg.AnthropicAPIKey != "" {
+		resp["anthropic_api_key"] = cfg.AnthropicAPIKey
+	}
+	if cfg.AnthropicModel != "" {
+		resp["anthropic_model"] = cfg.AnthropicModel
+	}
+	if cfg.AnthropicBaseURL != "" {
+		resp["anthropic_base_url"] = cfg.AnthropicBaseURL
+	}
+	if cfg.DeepSeekAPIKey != "" {
+		resp["deepseek_api_key"] = cfg.DeepSeekAPIKey
+	}
+	if cfg.DeepSeekModel != "" {
+		resp["deepseek_model"] = cfg.DeepSeekModel
+	}
+	if cfg.DeepSeekBaseURL != "" {
+		resp["deepseek_base_url"] = cfg.DeepSeekBaseURL
+	}
+	if cfg.OpenAIAPIKey != "" {
+		resp["openai_api_key"] = cfg.OpenAIAPIKey
+	}
+	if cfg.OpenAIModel != "" {
+		resp["openai_model"] = cfg.OpenAIModel
+	}
+	if cfg.OpenAIBaseURL != "" {
+		resp["openai_base_url"] = cfg.OpenAIBaseURL
+	}
+	writeJSON(w, 200, resp)
 }
 
 // putConfigHandler ports web-server.ts:422-440: SystemSettingsSchema.parse then updateConfig.
@@ -105,11 +148,25 @@ func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	patch := settings.UpdateSettings{
-		Language:      parsed.Language,
-		InputDir:      &parsed.InputDir,
-		OutputRootDir: &parsed.OutputRootDir,
-		OllamaModel:   &parsed.OllamaModel,
-		OllamaHost:    &parsed.OllamaHost,
+		Language:         parsed.Language,
+		InputDir:         &parsed.InputDir,
+		OutputRootDir:    &parsed.OutputRootDir,
+		OllamaModel:      &parsed.OllamaModel,
+		OllamaHost:       &parsed.OllamaHost,
+		AIProvider:       parsed.AIProvider,
+		CloudProvider:    parsed.CloudProvider,
+		GoogleAPIKey:     parsed.GoogleAPIKey,
+		GoogleModel:      parsed.GoogleModel,
+		GoogleBaseURL:    parsed.GoogleBaseURL,
+		AnthropicAPIKey:  parsed.AnthropicAPIKey,
+		AnthropicModel:   parsed.AnthropicModel,
+		AnthropicBaseURL: parsed.AnthropicBaseURL,
+		DeepSeekAPIKey:   parsed.DeepSeekAPIKey,
+		DeepSeekModel:    parsed.DeepSeekModel,
+		DeepSeekBaseURL:  parsed.DeepSeekBaseURL,
+		OpenAIAPIKey:     parsed.OpenAIAPIKey,
+		OpenAIModel:      parsed.OpenAIModel,
+		OpenAIBaseURL:    parsed.OpenAIBaseURL,
 	}
 	// nil means the field was omitted; an explicit [] is a provided empty denylist (TS `if (arr)`).
 	if parsed.PersonalNameDenylist != nil {
@@ -121,17 +178,67 @@ func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Make the change effective immediately (AI provider switch, Ollama host/model) instead of
+	// waiting for the next triage scan's ReloadConfig.
+	if s.deps.OnConfigChanged != nil {
+		s.deps.OnConfigChanged(s.deps.Settings.Config())
+	}
+
 	cfg := s.deps.Settings.Config()
+	respConfig := map[string]any{
+		"language":               cfg.Language,
+		"input_dir":              cfg.InputDir,
+		"output_root_dir":        cfg.OutputRootDir,
+		"ollama_model":           cfg.OllamaModel,
+		"ollama_host":            cfg.OllamaHost,
+		"personal_name_denylist": cfg.PersonalNameDenylist,
+	}
+	if cfg.AIProvider != "" {
+		respConfig["ai_provider"] = cfg.AIProvider
+	}
+	if cfg.CloudProvider != "" {
+		respConfig["cloud_provider"] = cfg.CloudProvider
+	}
+	if cfg.GoogleAPIKey != "" {
+		respConfig["google_api_key"] = cfg.GoogleAPIKey
+	}
+	if cfg.GoogleModel != "" {
+		respConfig["google_model"] = cfg.GoogleModel
+	}
+	if cfg.GoogleBaseURL != "" {
+		respConfig["google_base_url"] = cfg.GoogleBaseURL
+	}
+	if cfg.AnthropicAPIKey != "" {
+		respConfig["anthropic_api_key"] = cfg.AnthropicAPIKey
+	}
+	if cfg.AnthropicModel != "" {
+		respConfig["anthropic_model"] = cfg.AnthropicModel
+	}
+	if cfg.AnthropicBaseURL != "" {
+		respConfig["anthropic_base_url"] = cfg.AnthropicBaseURL
+	}
+	if cfg.DeepSeekAPIKey != "" {
+		respConfig["deepseek_api_key"] = cfg.DeepSeekAPIKey
+	}
+	if cfg.DeepSeekModel != "" {
+		respConfig["deepseek_model"] = cfg.DeepSeekModel
+	}
+	if cfg.DeepSeekBaseURL != "" {
+		respConfig["deepseek_base_url"] = cfg.DeepSeekBaseURL
+	}
+	if cfg.OpenAIAPIKey != "" {
+		respConfig["openai_api_key"] = cfg.OpenAIAPIKey
+	}
+	if cfg.OpenAIModel != "" {
+		respConfig["openai_model"] = cfg.OpenAIModel
+	}
+	if cfg.OpenAIBaseURL != "" {
+		respConfig["openai_base_url"] = cfg.OpenAIBaseURL
+	}
+
 	writeJSON(w, 200, map[string]any{
 		"message": "System settings updated successfully",
-		"config": map[string]any{
-			"language":               cfg.Language,
-			"input_dir":              cfg.InputDir,
-			"output_root_dir":        cfg.OutputRootDir,
-			"ollama_model":           cfg.OllamaModel,
-			"ollama_host":            cfg.OllamaHost,
-			"personal_name_denylist": cfg.PersonalNameDenylist,
-		},
+		"config":  respConfig,
 	})
 }
 

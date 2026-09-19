@@ -64,9 +64,9 @@
 //     to logEntryJSON / logSessionJSON so the response keys stay camelCase and optional fields
 //     (filename?, meta?, category?, subcategory?, decisionReason?) stay omittable, exactly as
 //     JSON.stringify drops `undefined`.
-//  5. infra/ollama.Client exposes CheckModelCanGenerate but not its internal list(); the OllamaClient
-//     interface below therefore declares ListModels(host). REPORTED GAP: infra/ollama needs an
-//     exported List/ListModels to wire the real client.
+//  5. infra/ollama.Client exposes CheckModelCanGenerate and ListModels(host); the OllamaClient
+//     interface below declares both. The earlier "REPORTED GAP: needs an exported ListModels" note
+//     was resolved when ListModels was added to infra/ollama.
 //  6. app/guards.ResolveManagedPath takes inputDir/outputDir explicitly; the server wrapper passes
 //     CONFIG.INPUT_DIR / CONFIG.OUTPUT_ROOT_DIR, matching web-server.ts:41.
 //  7. Zod's validation-error body is a pretty-printed JSON issue array; documentschema returns plain
@@ -162,8 +162,8 @@ type TaskState interface {
 }
 
 // OllamaClient is the Ollama surface the status/models routes need. The real *ollama.Client
-// satisfies CheckModelCanGenerate but NOT ListModels (its list() is unexported); see the package
-// comment, gap 5.
+// satisfies it: ListModels(host) targets GET {host}/api/tags and CheckModelCanGenerate performs the
+// capability probe.
 type OllamaClient interface {
 	ListModels(host string) ([]string, error)
 	CheckModelCanGenerate(model string, forceRefresh bool) ollama.ModelHealth
@@ -224,6 +224,10 @@ type Deps struct {
 	// RestartDelay is how long POST /api/server/restart waits before calling Exit, matching the TS
 	// setTimeout(..., 500). Tests set it to a small value; 0 means the 500 ms default.
 	RestartDelay time.Duration
+	// OnConfigChanged is called after PUT /api/config successfully persists a patch, with the
+	// settings read back from the store. It is the seam that makes a newly selected AI Engine take
+	// effect without restarting the process or starting a scan. nil means "skip".
+	OnConfigChanged func(settings.Config)
 	// RouteGroups are the per-server route-group registrations. Each is called once per NewServer
 	// with the server under construction, so it can register its routes on s.mux. A group closes
 	// over its own dependency struct, keeping that group's collaborators out of Deps; nil entries

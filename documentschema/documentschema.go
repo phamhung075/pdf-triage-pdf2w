@@ -44,6 +44,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
+
+	"github.com/phamhung075/pdf-triage-pdf2w/infra/aiprovider"
 )
 
 // SubcategoryItem mirrors the TS `SubcategoryItem` type. Aliases and Subcategories are always
@@ -102,6 +105,25 @@ type SystemSettings struct {
 	OllamaModel          string    `json:"ollama_model"`
 	OllamaHost           string    `json:"ollama_host"`
 	PersonalNameDenylist *[]string `json:"personal_name_denylist,omitempty"`
+
+	AIProvider    *string `json:"ai_provider,omitempty"`
+	CloudProvider *string `json:"cloud_provider,omitempty"`
+
+	GoogleAPIKey  *string `json:"google_api_key,omitempty"`
+	GoogleModel   *string `json:"google_model,omitempty"`
+	GoogleBaseURL *string `json:"google_base_url,omitempty"`
+
+	AnthropicAPIKey  *string `json:"anthropic_api_key,omitempty"`
+	AnthropicModel   *string `json:"anthropic_model,omitempty"`
+	AnthropicBaseURL *string `json:"anthropic_base_url,omitempty"`
+
+	DeepSeekAPIKey  *string `json:"deepseek_api_key,omitempty"`
+	DeepSeekModel   *string `json:"deepseek_model,omitempty"`
+	DeepSeekBaseURL *string `json:"deepseek_base_url,omitempty"`
+
+	OpenAIAPIKey  *string `json:"openai_api_key,omitempty"`
+	OpenAIModel   *string `json:"openai_model,omitempty"`
+	OpenAIBaseURL *string `json:"openai_base_url,omitempty"`
 }
 
 // DocumentMetadata mirrors DocumentMetadataSchema. Every non-required string field is
@@ -275,21 +297,65 @@ func ParseSystemSettings(rawJSON []byte) (SystemSettings, error) {
 	if out.OutputRootDir, err = requiredString(m, "output_root_dir", "Output directory is required"); err != nil {
 		return out, err
 	}
-	if out.OllamaModel, err = requiredString(m, "ollama_model", "Ollama model is required"); err != nil {
-		return out, err
+
+	aiProv, _ := optionalStringField(m, "ai_provider")
+	out.AIProvider = aiProv
+	isCloud := aiProv != nil && strings.ToLower(*aiProv) == "cloud"
+
+	if !isCloud {
+		if out.OllamaModel, err = requiredString(m, "ollama_model", "Ollama model is required"); err != nil {
+			return out, err
+		}
+		if out.OllamaModel != "qwen3.5:9b" {
+			return out, errors.New("Only 'qwen3.5:9b' is supported (Golden Rule #14) — other models, including cloud/subscription-gated ones, are rejected.")
+		}
+		if out.OllamaHost, err = requiredString(m, "ollama_host", "Ollama host is required"); err != nil {
+			return out, err
+		}
+	} else {
+		om, _ := optionalStringField(m, "ollama_model")
+		if om != nil && *om != "" {
+			out.OllamaModel = *om
+		} else {
+			out.OllamaModel = "qwen3.5:9b"
+		}
+		oh, _ := optionalStringField(m, "ollama_host")
+		if oh != nil && *oh != "" {
+			out.OllamaHost = *oh
+		}
 	}
-	if out.OllamaModel != "qwen3.5:9b" {
-		return out, errors.New("Only 'qwen3.5:9b' is supported (Golden Rule #14) — other models, including cloud/subscription-gated ones, are rejected.")
-	}
-	if out.OllamaHost, err = requiredString(m, "ollama_host", "Ollama host is required"); err != nil {
-		return out, err
-	}
+
 	if out.Language, err = optionalStringField(m, "language"); err != nil {
 		return out, err
 	}
 	if out.PersonalNameDenylist, err = optionalStringArrayField(m, "personal_name_denylist"); err != nil {
 		return out, err
 	}
+
+	out.CloudProvider, _ = optionalStringField(m, "cloud_provider")
+	// Empty/omitted keeps the historical Google default; a non-empty unknown name is rejected here so
+	// PUT /api/config answers 400 instead of later silently routing to Google.
+	if out.CloudProvider != nil {
+		name := strings.TrimSpace(*out.CloudProvider)
+		if name != "" {
+			if _, ok := aiprovider.NormalizeCloud(name); !ok {
+				return out, fmt.Errorf("unknown cloud provider %q", name)
+			}
+		}
+	}
+	out.GoogleAPIKey, _ = optionalStringField(m, "google_api_key")
+	out.GoogleModel, _ = optionalStringField(m, "google_model")
+	out.GoogleBaseURL, _ = optionalStringField(m, "google_base_url")
+	out.AnthropicAPIKey, _ = optionalStringField(m, "anthropic_api_key")
+	out.AnthropicModel, _ = optionalStringField(m, "anthropic_model")
+	out.AnthropicBaseURL, _ = optionalStringField(m, "anthropic_base_url")
+	out.DeepSeekAPIKey, _ = optionalStringField(m, "deepseek_api_key")
+	out.DeepSeekModel, _ = optionalStringField(m, "deepseek_model")
+	out.DeepSeekBaseURL, _ = optionalStringField(m, "deepseek_base_url")
+	out.OpenAIAPIKey, _ = optionalStringField(m, "openai_api_key")
+	out.OpenAIModel, _ = optionalStringField(m, "openai_model")
+	out.OpenAIBaseURL, _ = optionalStringField(m, "openai_base_url")
+
 	return out, nil
 }
 

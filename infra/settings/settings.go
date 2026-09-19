@@ -124,6 +124,26 @@ type Config struct {
 	MCPHTTPHost string
 
 	PersonalNameDenylist []string
+
+	// AI Provider configuration: Local (Ollama) vs Cloud (Google, Claude, DeepSeek, OpenAI)
+	AIProvider    string
+	CloudProvider string
+
+	GoogleAPIKey  string
+	GoogleModel   string
+	GoogleBaseURL string
+
+	AnthropicAPIKey  string
+	AnthropicModel   string
+	AnthropicBaseURL string
+
+	DeepSeekAPIKey  string
+	DeepSeekModel   string
+	DeepSeekBaseURL string
+
+	OpenAIAPIKey  string
+	OpenAIModel   string
+	OpenAIBaseURL string
 }
 
 // Options configures New. BaseDir/DataDir are explicit overrides used only when the matching env
@@ -284,6 +304,48 @@ func (s *Store) ReloadFromDisk() {
 		s.cfg.OllamaHost = jsString(v)
 	}
 	s.cfg.PersonalNameDenylist = sanitizePersonalNameDenylist(current["personal_name_denylist"])
+	if v := current["ai_provider"]; jsTruthy(v) {
+		s.cfg.AIProvider = jsString(v)
+	}
+	if v := current["cloud_provider"]; jsTruthy(v) {
+		s.cfg.CloudProvider = jsString(v)
+	}
+	if v := current["google_api_key"]; jsTruthy(v) {
+		s.cfg.GoogleAPIKey = jsString(v)
+	}
+	if v := current["google_model"]; jsTruthy(v) {
+		s.cfg.GoogleModel = jsString(v)
+	}
+	if v := current["google_base_url"]; jsTruthy(v) {
+		s.cfg.GoogleBaseURL = jsString(v)
+	}
+	if v := current["anthropic_api_key"]; jsTruthy(v) {
+		s.cfg.AnthropicAPIKey = jsString(v)
+	}
+	if v := current["anthropic_model"]; jsTruthy(v) {
+		s.cfg.AnthropicModel = jsString(v)
+	}
+	if v := current["anthropic_base_url"]; jsTruthy(v) {
+		s.cfg.AnthropicBaseURL = jsString(v)
+	}
+	if v := current["deepseek_api_key"]; jsTruthy(v) {
+		s.cfg.DeepSeekAPIKey = jsString(v)
+	}
+	if v := current["deepseek_model"]; jsTruthy(v) {
+		s.cfg.DeepSeekModel = jsString(v)
+	}
+	if v := current["deepseek_base_url"]; jsTruthy(v) {
+		s.cfg.DeepSeekBaseURL = jsString(v)
+	}
+	if v := current["openai_api_key"]; jsTruthy(v) {
+		s.cfg.OpenAIAPIKey = jsString(v)
+	}
+	if v := current["openai_model"]; jsTruthy(v) {
+		s.cfg.OpenAIModel = jsString(v)
+	}
+	if v := current["openai_base_url"]; jsTruthy(v) {
+		s.cfg.OpenAIBaseURL = jsString(v)
+	}
 }
 
 // UpdateConfig is `updateConfig(newSettings)`: mutate Config in place, persist the six-field
@@ -310,8 +372,59 @@ func (s *Store) UpdateConfig(patch UpdateSettings) error {
 	if patch.PersonalNameDenylist != nil {
 		s.cfg.PersonalNameDenylist = sanitizePersonalNameDenylist(patch.PersonalNameDenylist)
 	}
+	if patch.AIProvider != nil && *patch.AIProvider != "" {
+		s.cfg.AIProvider = *patch.AIProvider
+	}
+	if patch.CloudProvider != nil && *patch.CloudProvider != "" {
+		s.cfg.CloudProvider = *patch.CloudProvider
+	}
+	if patch.GoogleAPIKey != nil {
+		s.cfg.GoogleAPIKey = *patch.GoogleAPIKey
+	}
+	if patch.GoogleModel != nil && *patch.GoogleModel != "" {
+		s.cfg.GoogleModel = *patch.GoogleModel
+	}
+	if patch.GoogleBaseURL != nil {
+		s.cfg.GoogleBaseURL = *patch.GoogleBaseURL
+	}
+	if patch.AnthropicAPIKey != nil {
+		s.cfg.AnthropicAPIKey = *patch.AnthropicAPIKey
+	}
+	if patch.AnthropicModel != nil && *patch.AnthropicModel != "" {
+		s.cfg.AnthropicModel = *patch.AnthropicModel
+	}
+	if patch.AnthropicBaseURL != nil {
+		s.cfg.AnthropicBaseURL = *patch.AnthropicBaseURL
+	}
+	if patch.DeepSeekAPIKey != nil {
+		s.cfg.DeepSeekAPIKey = *patch.DeepSeekAPIKey
+	}
+	if patch.DeepSeekModel != nil && *patch.DeepSeekModel != "" {
+		s.cfg.DeepSeekModel = *patch.DeepSeekModel
+	}
+	if patch.DeepSeekBaseURL != nil {
+		s.cfg.DeepSeekBaseURL = *patch.DeepSeekBaseURL
+	}
+	if patch.OpenAIAPIKey != nil {
+		s.cfg.OpenAIAPIKey = *patch.OpenAIAPIKey
+	}
+	if patch.OpenAIModel != nil && *patch.OpenAIModel != "" {
+		s.cfg.OpenAIModel = *patch.OpenAIModel
+	}
+	if patch.OpenAIBaseURL != nil {
+		s.cfg.OpenAIBaseURL = *patch.OpenAIBaseURL
+	}
 	cfg := s.cfg
 	s.mu.Unlock()
+
+	aiProv := cfg.AIProvider
+	if aiProv == "local" {
+		aiProv = ""
+	}
+	cloudProv := cfg.CloudProvider
+	if aiProv == "" {
+		cloudProv = ""
+	}
 
 	data := persistedSettings{
 		Language:             cfg.Language,
@@ -320,6 +433,20 @@ func (s *Store) UpdateConfig(patch UpdateSettings) error {
 		OllamaModel:          cfg.OllamaModel,
 		OllamaHost:           cfg.OllamaHost,
 		PersonalNameDenylist: cfg.PersonalNameDenylist,
+		AIProvider:           aiProv,
+		CloudProvider:        cloudProv,
+		GoogleAPIKey:         cfg.GoogleAPIKey,
+		GoogleModel:          cfg.GoogleModel,
+		GoogleBaseURL:        cfg.GoogleBaseURL,
+		AnthropicAPIKey:      cfg.AnthropicAPIKey,
+		AnthropicModel:       cfg.AnthropicModel,
+		AnthropicBaseURL:     cfg.AnthropicBaseURL,
+		DeepSeekAPIKey:       cfg.DeepSeekAPIKey,
+		DeepSeekModel:        cfg.DeepSeekModel,
+		DeepSeekBaseURL:      cfg.DeepSeekBaseURL,
+		OpenAIAPIKey:         cfg.OpenAIAPIKey,
+		OpenAIModel:          cfg.OpenAIModel,
+		OpenAIBaseURL:        cfg.OpenAIBaseURL,
 	}
 	payload, err := marshalSettings(data)
 	if err != nil {
@@ -348,6 +475,25 @@ type UpdateSettings struct {
 	OllamaModel          *string
 	OllamaHost           *string
 	PersonalNameDenylist []string
+
+	AIProvider    *string
+	CloudProvider *string
+
+	GoogleAPIKey  *string
+	GoogleModel   *string
+	GoogleBaseURL *string
+
+	AnthropicAPIKey  *string
+	AnthropicModel   *string
+	AnthropicBaseURL *string
+
+	DeepSeekAPIKey  *string
+	DeepSeekModel   *string
+	DeepSeekBaseURL *string
+
+	OpenAIAPIKey  *string
+	OpenAIModel   *string
+	OpenAIBaseURL *string
 }
 
 // persistedSettings mirrors the dataToSave object updateConfig writes. Field order matches the TS
@@ -359,6 +505,25 @@ type persistedSettings struct {
 	OllamaModel          string   `json:"ollama_model"`
 	OllamaHost           string   `json:"ollama_host"`
 	PersonalNameDenylist []string `json:"personal_name_denylist"`
+
+	AIProvider    string `json:"ai_provider,omitempty"`
+	CloudProvider string `json:"cloud_provider,omitempty"`
+
+	GoogleAPIKey  string `json:"google_api_key,omitempty"`
+	GoogleModel   string `json:"google_model,omitempty"`
+	GoogleBaseURL string `json:"google_base_url,omitempty"`
+
+	AnthropicAPIKey  string `json:"anthropic_api_key,omitempty"`
+	AnthropicModel   string `json:"anthropic_model,omitempty"`
+	AnthropicBaseURL string `json:"anthropic_base_url,omitempty"`
+
+	DeepSeekAPIKey  string `json:"deepseek_api_key,omitempty"`
+	DeepSeekModel   string `json:"deepseek_model,omitempty"`
+	DeepSeekBaseURL string `json:"deepseek_base_url,omitempty"`
+
+	OpenAIAPIKey  string `json:"openai_api_key,omitempty"`
+	OpenAIModel   string `json:"openai_model,omitempty"`
+	OpenAIBaseURL string `json:"openai_base_url,omitempty"`
 }
 
 // LoadCustomSettings is `loadCustomSettings()`: the parsed settings.json, or an empty map when the
@@ -556,7 +721,10 @@ func buildConfig(custom map[string]any, env *envSource, baseDir, dataDir string,
 		Host: env.or("PDF_TRIAGE_HOST", "127.0.0.1"),
 
 		// pdf2w extraction service (self-hosted markdown-extract-service): required, no fallback.
-		PDF2WServiceURL:       strings.TrimSpace(env.value("PDF2W_SERVICE_URL")),
+		PDF2WServiceURL: strings.TrimSpace(jsString(firstTruthy(
+			env.value("PDF2W_SERVICE_URL"),
+			custom["pdf2w_service_url"],
+		))),
 		PDF2WServiceTimeoutMS: parseTimeout(env.value("PDF2W_SERVICE_TIMEOUT_MS")),
 
 		// MCP Streamable HTTP transport (npm run mcp). Unlike HOST above, this one defaults to
@@ -566,6 +734,59 @@ func buildConfig(custom map[string]any, env *envSource, baseDir, dataDir string,
 		MCPHTTPHost: env.or("MCP_HTTP_HOST", "0.0.0.0"),
 
 		PersonalNameDenylist: sanitizePersonalNameDenylist(custom["personal_name_denylist"]),
+
+		AIProvider: jsString(firstTruthy(
+			custom["ai_provider"],
+			env.value("AI_PROVIDER"),
+		)),
+		CloudProvider: jsString(firstTruthy(
+			custom["cloud_provider"],
+			env.value("CLOUD_PROVIDER"),
+		)),
+
+		GoogleAPIKey: jsString(firstTruthy(
+			custom["google_api_key"],
+			env.value("GEMINI_API_KEY"),
+			env.value("GOOGLE_API_KEY"),
+		)),
+		GoogleModel: jsString(firstTruthy(
+			custom["google_model"],
+			env.value("GEMINI_MODEL"),
+			env.value("GOOGLE_MODEL"),
+		)),
+		GoogleBaseURL: jsString(firstTruthy(custom["google_base_url"], env.value("GOOGLE_BASE_URL"))),
+
+		AnthropicAPIKey: jsString(firstTruthy(
+			custom["anthropic_api_key"],
+			env.value("ANTHROPIC_API_KEY"),
+			env.value("CLAUDE_API_KEY"),
+		)),
+		AnthropicModel: jsString(firstTruthy(
+			custom["anthropic_model"],
+			env.value("ANTHROPIC_MODEL"),
+			env.value("CLAUDE_MODEL"),
+		)),
+		AnthropicBaseURL: jsString(firstTruthy(custom["anthropic_base_url"], env.value("ANTHROPIC_BASE_URL"))),
+
+		DeepSeekAPIKey: jsString(firstTruthy(
+			custom["deepseek_api_key"],
+			env.value("DEEPSEEK_API_KEY"),
+		)),
+		DeepSeekModel: jsString(firstTruthy(
+			custom["deepseek_model"],
+			env.value("DEEPSEEK_MODEL"),
+		)),
+		DeepSeekBaseURL: jsString(firstTruthy(custom["deepseek_base_url"], env.value("DEEPSEEK_BASE_URL"))),
+
+		OpenAIAPIKey: jsString(firstTruthy(
+			custom["openai_api_key"],
+			env.value("OPENAI_API_KEY"),
+		)),
+		OpenAIModel: jsString(firstTruthy(
+			custom["openai_model"],
+			env.value("OPENAI_MODEL"),
+		)),
+		OpenAIBaseURL: jsString(firstTruthy(custom["openai_base_url"], env.value("OPENAI_BASE_URL"))),
 	}
 }
 

@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"github.com/phamhung075/pdf-triage-pdf2w/chatquery"
 	"github.com/phamhung075/pdf-triage-pdf2w/classification"
 	"github.com/phamhung075/pdf-triage-pdf2w/httpapi"
+	"github.com/phamhung075/pdf-triage-pdf2w/infra/aiprovider"
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/imageprocessor"
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/logger"
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/ollama"
@@ -55,6 +59,8 @@ type appOptions struct {
 
 	// Spawner overrides the OS launcher used by POST /api/open-location and /api/open-chrome.
 	Spawner httpapi.Spawner
+	// EnsurePdf2w overrides the auto-spawn of pdf2md-server when unreachable.
+	EnsurePdf2w func(url string) error
 	// McpOpener / McpRunner override the MCP open_document_folder launcher.
 	McpOpener mcpserver.Opener
 	McpRunner mcpserver.Runner
@@ -69,6 +75,7 @@ type application struct {
 	settings  *settings.Store
 	log       *logger.Logger
 	db        *database.Store
+	aiManager *aiprovider.Manager
 	scanLock  *scanlock.Guard
 	scanner   *triagescan.Scanner
 	stepper   *imagetopdf.Stepper
@@ -135,6 +142,30 @@ func hasPublicDir(dir string) bool {
 	return err == nil && info.IsDir()
 }
 
+// aiConfigFrom is the single mapping from the settings-layer Config to the aiprovider.Config. It is
+// used at boot, on every scan reload and on every successful PUT /api/config, so a newly selected
+// AI Engine reaches the shared Manager without duplication.
+func aiConfigFrom(c settings.Config) aiprovider.Config {
+	return aiprovider.Config{
+		AIProvider:       c.AIProvider,
+		CloudProvider:    c.CloudProvider,
+		OllamaHost:       c.OllamaHost,
+		OllamaModel:      c.OllamaModel,
+		GoogleAPIKey:     c.GoogleAPIKey,
+		GoogleModel:      c.GoogleModel,
+		GoogleBaseURL:    c.GoogleBaseURL,
+		AnthropicAPIKey:  c.AnthropicAPIKey,
+		AnthropicModel:   c.AnthropicModel,
+		AnthropicBaseURL: c.AnthropicBaseURL,
+		DeepSeekAPIKey:   c.DeepSeekAPIKey,
+		DeepSeekModel:    c.DeepSeekModel,
+		DeepSeekBaseURL:  c.DeepSeekBaseURL,
+		OpenAIAPIKey:     c.OpenAIAPIKey,
+		OpenAIModel:      c.OpenAIModel,
+		OpenAIBaseURL:    c.OpenAIBaseURL,
+	}
+}
+
 // newApplication builds the whole dependency graph. The settings store is created first because
 // every path derives from it; a failure to create it (or to open the SQLite database) is fatal.
 func newApplication(opts appOptions) (*application, error) {
@@ -154,6 +185,15 @@ func newApplication(opts appOptions) (*application, error) {
 	}
 
 	log := logger.New(logger.OptionsFromEnv(dataDir, os.Getenv))
+
+	if cfg.PDF2WServiceURL == "" {
+		cfg.PDF2WServiceURL = "http://127.0.0.1:3984"
+	}
+	if opts.EnsurePdf2w != nil {
+		_ = opts.EnsurePdf2w(cfg.PDF2WServiceURL)
+	} else if opts.DataDir == "" && opts.Spawner == nil {
+		ensurePdf2wService(cfg.PDF2WServiceURL, baseDir, log)
+	}
 
 	db, err := database.Open(cfg.DBPath)
 	if err != nil {
@@ -181,10 +221,45 @@ func newApplication(opts appOptions) (*application, error) {
 		Sleep:      opts.OllamaSleep,
 		Logf:       func(format string, args ...any) { log.Warn("OLLAMA", fmt.Sprintf(format, args...), nil) },
 	})
+	aiManager := aiprovider.NewManager(aiConfigFrom(cfg), ollamaClient)
+
 	visionClient := vision.NewClient(cfg.OllamaHost, cfg.OllamaVisionModel)
 	stepper := imagetopdf.NewStepper(imagetopdf.DefaultDeps(visionClient, log))
 	pdfExtractor := relocalize.NewPDFExtractor(cfg, log)
 	registrySync := relocalize.JSONRegistrySync{DB: db, Path: cfg.JSONRegistryPath}
+
+	cloudModelFor := func(c settings.Config) string {
+		canonical, ok := aiprovider.NormalizeCloud(c.CloudProvider)
+		if !ok {
+			if strings.TrimSpace(c.CloudProvider) != "" {
+				return ""
+			}
+			canonical = "google"
+		}
+		switch canonical {
+		case "deepseek":
+			if c.DeepSeekModel != "" {
+				return c.DeepSeekModel
+			}
+			return "deepseek-chat"
+		case "google":
+			if c.GoogleModel != "" {
+				return c.GoogleModel
+			}
+			return "gemini-2.5-flash"
+		case "claude":
+			if c.AnthropicModel != "" {
+				return c.AnthropicModel
+			}
+			return "claude-3-7-sonnet-20250219"
+		case "openai":
+			if c.OpenAIModel != "" {
+				return c.OpenAIModel
+			}
+			return "gpt-4o-mini"
+		}
+		return ""
+	}
 
 	// --- app layer ----------------------------------------------------------------------------
 	classifyDeps := classify.Deps{
@@ -193,8 +268,23 @@ func newApplication(opts appOptions) (*application, error) {
 			OllamaHost:           cfg.OllamaHost,
 			Language:             cfg.Language,
 			PersonalNameDenylist: cfg.PersonalNameDenylist,
+			AIProvider:           cfg.AIProvider,
+			CloudProvider:        cfg.CloudProvider,
+			CloudModel:           cloudModelFor(cfg),
+			GetConfig: func() classify.Config {
+				c := settingsStore.Config()
+				return classify.Config{
+					OllamaModel:          c.OllamaModel,
+					OllamaHost:           c.OllamaHost,
+					Language:             c.Language,
+					PersonalNameDenylist: c.PersonalNameDenylist,
+					AIProvider:           c.AIProvider,
+					CloudProvider:        c.CloudProvider,
+					CloudModel:           cloudModelFor(c),
+				}
+			},
 		},
-		Ollama:                ollamaClient,
+		Ollama:                aiManager,
 		Categories:            categoriesStore,
 		EntityDictionary:      entityDictionaryStore,
 		PromptPersonalization: promptStore,
@@ -261,10 +351,10 @@ func newApplication(opts appOptions) (*application, error) {
 
 	aichatDeps := aichat.Deps{
 		Store:  db,
-		Ollama: ollamaClient,
+		Ollama: aiManager,
 		PlanQuery: func(userMessage string, now time.Time) (chatquery.StructuredQuery, error) {
 			return chatplanner.PlanQuery(chatplanner.Deps{
-				Ollama:     ollamaClient,
+				Ollama:     aiManager,
 				Categories: categoriesStore.GetCategoriesConfig,
 				Log:        log,
 			}, userMessage, now), nil
@@ -273,14 +363,22 @@ func newApplication(opts appOptions) (*application, error) {
 	}
 
 	scanner := triagescan.New(triagescan.Deps{
-		Config:            cfg,
-		ReloadConfig:      func() settings.Config { settingsStore.ReloadFromDisk(); return settingsStore.Config() },
+		Config: cfg,
+		ReloadConfig: func() settings.Config {
+			settingsStore.ReloadFromDisk()
+			newCfg := settingsStore.Config()
+			if newCfg.PDF2WServiceURL == "" {
+				newCfg.PDF2WServiceURL = "http://127.0.0.1:3984"
+			}
+			aiManager.UpdateConfig(aiConfigFrom(newCfg))
+			return newCfg
+		},
 		EnsureDirectories: settingsStore.EnsureDirectoriesExist,
 		DB:                db,
 		Extractor:         pdfExtractor,
 		Converter:         converter,
 		Classifier:        classifyDeps,
-		Ollama:            ollamaClient,
+		Ollama:            aiManager,
 		Relocalizer:       relocalizer,
 		Registry:          triagescan.JSONRegistrySync{DB: db, Path: cfg.JSONRegistryPath},
 		Log:               triagescan.AdaptLogger(log),
@@ -301,12 +399,17 @@ func newApplication(opts appOptions) (*application, error) {
 		ManualDecisions: decisionsStore,
 		Logs:            log,
 		Tasks:           tasks,
-		Ollama:          ollamaClient,
+		Ollama:          aiManager,
 		Opener:          newOSLauncher(),
 		Spawner:         spawner,
 		StartOllama:     startOllamaServe,
 		Exit:            os.Exit,
 		PublicDir:       filepath.Join(baseDir, "public"),
+		// Saving Settings must retarget the shared Manager immediately: chat, /api/ollama/status and
+		// classification all read it, and the scan reload is too late for a Save-then-chat flow.
+		OnConfigChanged: func(c settings.Config) {
+			aiManager.UpdateConfig(aiConfigFrom(c))
+		},
 		RouteGroups: []httpapi.RouteGroup{
 			func(server *httpapi.Server) { captured = server },
 			httpapi.DocumentReadRoutes(httpapi.DocumentReadDeps{
@@ -386,6 +489,7 @@ func newApplication(opts appOptions) (*application, error) {
 		settings:  settingsStore,
 		log:       log,
 		db:        db,
+		aiManager: aiManager,
 		scanLock:  scanLock,
 		scanner:   scanner,
 		stepper:   stepper,
@@ -438,4 +542,93 @@ func (a *application) serve(ctx context.Context, addr string, startOptions httpa
 		a.watcher.Stop()
 	}
 	return err
+}
+
+func isLocalURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
+}
+
+func ensurePdf2wService(serviceURL, baseDir string, log *logger.Logger) {
+	if serviceURL == "" || !isLocalURL(serviceURL) {
+		return
+	}
+
+	client := &http.Client{Timeout: 300 * time.Millisecond}
+	healthURL := strings.TrimRight(serviceURL, "/") + "/health"
+	resp, err := client.Get(healthURL)
+	if err == nil {
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return
+		}
+	}
+
+	candidates := []string{
+		os.Getenv("PDF2MD_SERVER_BIN"),
+		filepath.Join(baseDir, "..", "markdown-extract-service", "public", "server", "bin", "pdf2md-server"),
+		"/home/daihu/__projects__/markdown-extract-service/public/server/bin/pdf2md-server",
+		filepath.Join(baseDir, "bin", "pdf2md-server"),
+	}
+
+	var binPath string
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if info, err := os.Stat(c); err == nil && !info.IsDir() {
+			binPath = c
+			break
+		}
+	}
+
+	if binPath == "" {
+		if lp, err := exec.LookPath("pdf2md-server"); err == nil {
+			binPath = lp
+		}
+	}
+
+	if binPath == "" {
+		if log != nil {
+			log.Warn("PDF2W", "pdf2w extraction service is unreachable and pdf2md-server binary not found", nil)
+		}
+		return
+	}
+
+	port := "3984"
+	if parsed, err := url.Parse(serviceURL); err == nil && parsed.Port() != "" {
+		port = parsed.Port()
+	}
+
+	cmd := exec.Command(binPath)
+	cmd.Env = append(os.Environ(), "PORT="+port)
+	if err := cmd.Start(); err != nil {
+		if log != nil {
+			log.Warn("PDF2W", fmt.Sprintf("Failed to spawn %s: %v", binPath, err), nil)
+		}
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+
+	if log != nil {
+		log.Info("PDF2W", fmt.Sprintf("Spawned %s on port %s", binPath, port), nil)
+	}
+
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if log != nil {
+					log.Info("PDF2W", "pdf2w extraction service is ready", nil)
+				}
+				return
+			}
+		}
+	}
 }

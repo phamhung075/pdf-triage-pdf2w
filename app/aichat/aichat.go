@@ -613,11 +613,23 @@ func ProcessChatQuery(deps Deps, userMessage string, history []ChatMessage, now 
 
 // catchResponse is the TS catch branch (ai-chat-assistant.ts:300-320). Its formatted documents
 // deliberately omit file_type, matching the TS object literal.
+//
+// The document-list fallback is kept for every failure so matched documents are still returned, but
+// a non-Ollama provider failure (missing/invalid cloud API key, HTTP status error, timeout) also
+// gets a user-visible warning. Previously the error only reached the log, so the chat looked
+// healthy while every cloud answer silently degraded to a plain document list. An
+// *ollama.OllamaUnavailableError keeps the pinned fallback answer byte-for-byte: Ollama being down
+// is already surfaced by its own reminder elsewhere and must not change this contract.
 func catchResponse(deps Deps, matchedDocs []database.DocumentRecord, err error) ChatResponse {
 	deps.errorf(fmt.Sprintf("Failed to generate AI response: %s", err.Error()))
 	formattedDocs := formatDocuments(matchedDocs, false)
+	answer := fmt.Sprintf("Voici les %d document(s) trouvé(s) dans vos archives pour votre demande :", len(formattedDocs))
+	var unavailable *ollama.OllamaUnavailableError
+	if !errors.As(err, &unavailable) {
+		answer += fmt.Sprintf("\n\n⚠️ Erreur du fournisseur IA : %s", sanitizeProviderError(err.Error()))
+	}
 	return ChatResponse{
-		Answer:           fmt.Sprintf("Voici les %d document(s) trouvé(s) dans vos archives pour votre demande :", len(formattedDocs)),
+		Answer:           answer,
 		MatchedDocuments: formattedDocs,
 	}
 }

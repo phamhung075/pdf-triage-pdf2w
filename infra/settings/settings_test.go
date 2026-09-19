@@ -912,6 +912,50 @@ func TestUpdatedSettingsShape(t *testing.T) {
 	}
 }
 
+func TestAIProviderSettings(t *testing.T) {
+	s := newSetup(t)
+	st := s.open()
+
+	// Initially local
+	cfg := st.Config()
+	if cfg.AIProvider != "" && cfg.AIProvider != "local" {
+		t.Fatalf("expected local AI provider by default, got %q", cfg.AIProvider)
+	}
+
+	// Update to cloud with Gemini and Claude keys
+	if err := st.UpdateConfig(UpdateSettings{
+		AIProvider:      strp("cloud"),
+		CloudProvider:   strp("google"),
+		GoogleAPIKey:    strp("g-key-123"),
+		GoogleModel:     strp("gemini-2.5-flash"),
+		AnthropicAPIKey: strp("ant-key-456"),
+		AnthropicModel:  strp("claude-3-7-sonnet-20250219"),
+	}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	updated := st.Config()
+	if updated.AIProvider != "cloud" {
+		t.Errorf("AIProvider = %q, want cloud", updated.AIProvider)
+	}
+	if updated.CloudProvider != "google" {
+		t.Errorf("CloudProvider = %q, want google", updated.CloudProvider)
+	}
+	if updated.GoogleAPIKey != "g-key-123" {
+		t.Errorf("GoogleAPIKey = %q, want g-key-123", updated.GoogleAPIKey)
+	}
+	if updated.AnthropicAPIKey != "ant-key-456" {
+		t.Errorf("AnthropicAPIKey = %q, want ant-key-456", updated.AnthropicAPIKey)
+	}
+
+	// Reload from disk to verify persistence
+	st.ReloadFromDisk()
+	reloaded := st.Config()
+	if reloaded.AIProvider != "cloud" || reloaded.GoogleAPIKey != "g-key-123" {
+		t.Errorf("reloaded config mismatch: %+v", reloaded)
+	}
+}
+
 // quote renders a path as a JSON string for embedding in a settings.json fixture.
 func quote(s string) string {
 	b, _ := json.Marshal(s)

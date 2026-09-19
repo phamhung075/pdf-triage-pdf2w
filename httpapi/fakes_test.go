@@ -58,6 +58,48 @@ func (f *fakeSettings) UpdateConfig(patch settings.UpdateSettings) error {
 	if patch.PersonalNameDenylist != nil {
 		f.cfg.PersonalNameDenylist = patch.PersonalNameDenylist
 	}
+	if patch.AIProvider != nil && *patch.AIProvider != "" {
+		f.cfg.AIProvider = *patch.AIProvider
+	}
+	if patch.CloudProvider != nil && *patch.CloudProvider != "" {
+		f.cfg.CloudProvider = *patch.CloudProvider
+	}
+	if patch.GoogleAPIKey != nil {
+		f.cfg.GoogleAPIKey = *patch.GoogleAPIKey
+	}
+	if patch.GoogleModel != nil {
+		f.cfg.GoogleModel = *patch.GoogleModel
+	}
+	if patch.GoogleBaseURL != nil {
+		f.cfg.GoogleBaseURL = *patch.GoogleBaseURL
+	}
+	if patch.AnthropicAPIKey != nil {
+		f.cfg.AnthropicAPIKey = *patch.AnthropicAPIKey
+	}
+	if patch.AnthropicModel != nil {
+		f.cfg.AnthropicModel = *patch.AnthropicModel
+	}
+	if patch.AnthropicBaseURL != nil {
+		f.cfg.AnthropicBaseURL = *patch.AnthropicBaseURL
+	}
+	if patch.DeepSeekAPIKey != nil {
+		f.cfg.DeepSeekAPIKey = *patch.DeepSeekAPIKey
+	}
+	if patch.DeepSeekModel != nil {
+		f.cfg.DeepSeekModel = *patch.DeepSeekModel
+	}
+	if patch.DeepSeekBaseURL != nil {
+		f.cfg.DeepSeekBaseURL = *patch.DeepSeekBaseURL
+	}
+	if patch.OpenAIAPIKey != nil {
+		f.cfg.OpenAIAPIKey = *patch.OpenAIAPIKey
+	}
+	if patch.OpenAIModel != nil {
+		f.cfg.OpenAIModel = *patch.OpenAIModel
+	}
+	if patch.OpenAIBaseURL != nil {
+		f.cfg.OpenAIBaseURL = *patch.OpenAIBaseURL
+	}
 	return nil
 }
 

@@ -195,6 +195,27 @@ func (c *Client) logf(format string, args ...any) {
 	}
 }
 
+// WithHostModel returns a copy of the client using a different base URL and default model. Every
+// other constructor option — embed model, timeout, spawn/sleep hooks, logger, HTTP client — is
+// preserved. An empty host/model keeps the current value. The receiver is never mutated: callers can
+// swap the returned pointer under their own lock without racing in-flight calls on the old client.
+func (c *Client) WithHostModel(host, model string) *Client {
+	if c == nil {
+		return nil
+	}
+	if host == "" {
+		host = c.cfg.BaseURL
+	}
+	if model == "" {
+		model = c.cfg.Model
+	}
+	clone := *c
+	clone.cfg = c.cfg
+	clone.cfg.BaseURL = host
+	clone.cfg.Model = model
+	return &clone
+}
+
 func (c *Client) baseURL() string {
 	return strings.TrimRight(c.cfg.BaseURL, "/")
 }

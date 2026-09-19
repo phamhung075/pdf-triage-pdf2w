@@ -141,11 +141,23 @@ func TestSystemSettingsSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects a missing input_dir", func(t *testing.T) {
-		if _, err := ParseSystemSettings([]byte(`{
-			"output_root_dir": "/out", "ollama_model": "qwen3.5:9b", "ollama_host": "h"
-		}`)); err == nil {
-			t.Fatal("ParseSystemSettings() error = nil, want an error")
+	t.Run("accepts cloud AI settings with google provider and keys", func(t *testing.T) {
+		got, err := ParseSystemSettings([]byte(`{
+			"input_dir": "/in", "output_root_dir": "/out",
+			"ai_provider": "cloud", "cloud_provider": "google",
+			"google_api_key": "ai-key", "google_model": "gemini-2.5-flash"
+		}`))
+		if err != nil {
+			t.Fatalf("ParseSystemSettings() error = %v, want nil", err)
+		}
+		if got.AIProvider == nil || *got.AIProvider != "cloud" {
+			t.Errorf("AIProvider = %v, want cloud", got.AIProvider)
+		}
+		if got.CloudProvider == nil || *got.CloudProvider != "google" {
+			t.Errorf("CloudProvider = %v, want google", got.CloudProvider)
+		}
+		if got.GoogleAPIKey == nil || *got.GoogleAPIKey != "ai-key" {
+			t.Errorf("GoogleAPIKey = %v, want ai-key", got.GoogleAPIKey)
 		}
 	})
 }

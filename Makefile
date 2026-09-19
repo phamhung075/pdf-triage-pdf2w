@@ -11,6 +11,7 @@ all: build
 ## dev: run server directly from source with change on save (air or go run)
 dev:
 	@mkdir -p tmp
+	@curl -s http://127.0.0.1:3984/health >/dev/null 2>&1 || (test -x ../../../markdown-extract-service/public/server/bin/pdf2md-server && PORT=3984 ../../../markdown-extract-service/public/server/bin/pdf2md-server >/dev/null 2>&1 &)
 	@PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-$$(cd ../.. && pwd)}" $(AIR) || PDF_TRIAGE_BASE_DIR="$${PDF_TRIAGE_BASE_DIR:-$$(cd ../.. && pwd)}" $(GO) run $(CMD) serve
 
 ## build: static binary for the host platform.

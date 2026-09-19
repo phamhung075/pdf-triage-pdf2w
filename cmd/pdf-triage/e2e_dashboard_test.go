@@ -159,4 +159,184 @@ func TestE2EDashboardAndAPI(t *testing.T) {
 			t.Errorf("expected Content-Type text/event-stream, got %q", ct)
 		}
 	})
+
+	// 8. POST /api/ai/test validation
+	t.Run("POST /api/ai/test validation", func(t *testing.T) {
+		// Missing fields
+		res, err := client.Post(ts.URL+"/api/ai/test", "application/json", strings.NewReader(`{}`))
+		if err != nil {
+			t.Fatalf("POST /api/ai/test failed: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request, got %d", res.StatusCode)
+		}
+
+		// Unknown provider
+		res2, err := client.Post(ts.URL+"/api/ai/test", "application/json", strings.NewReader(`{"provider":"unknown","api_key":"test"}`))
+		if err != nil {
+			t.Fatalf("POST /api/ai/test failed: %v", err)
+		}
+		defer res2.Body.Close()
+		if res2.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 Bad Request for unknown provider, got %d", res2.StatusCode)
+		}
+	})
+
+	// 9. PUT /api/config with Cloud AI settings
+	t.Run("PUT and GET /api/config with Cloud AI", func(t *testing.T) {
+		tempIn := t.TempDir()
+		tempOut := t.TempDir()
+		putBody := `{"language":"FR","input_dir":` + `"` + strings.ReplaceAll(tempIn, `\`, `/`) + `",` +
+			`"output_root_dir":` + `"` + strings.ReplaceAll(tempOut, `\`, `/`) + `",` +
+			`"ollama_host":"http://127.0.0.1:11434",` +
+			`"ollama_model":"qwen3.5:9b",` +
+			`"ai_provider":"cloud",` +
+			`"cloud_provider":"google",` +
+			`"google_api_key":"AIzaSyFakeKeyForTest",` +
+			`"google_model":"gemini-2.5-flash",` +
+			`"anthropic_api_key":"sk-ant-fake-key",` +
+			`"anthropic_model":"claude-3-7-sonnet-20250219",` +
+			`"deepseek_api_key":"sk-deepseek-fake-key",` +
+			`"deepseek_model":"deepseek-chat",` +
+			`"openai_api_key":"sk-openai-fake-key",` +
+			`"openai_model":"gpt-4o-mini"}`
+
+		req, err := http.NewRequest(http.MethodPut, ts.URL+"/api/config", strings.NewReader(putBody))
+		if err != nil {
+			t.Fatalf("failed to create PUT request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("PUT /api/config failed: %v", err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(res.Body)
+			t.Fatalf("expected 200 OK for PUT /api/config, got %d: %s", res.StatusCode, string(body))
+		}
+
+		// Verify GET /api/config reflects the saved cloud configuration
+		getRes, err := client.Get(ts.URL + "/api/config")
+		if err != nil {
+			t.Fatalf("GET /api/config failed: %v", err)
+		}
+		defer getRes.Body.Close()
+
+		var cfg map[string]any
+		if err := json.NewDecoder(getRes.Body).Decode(&cfg); err != nil {
+			t.Fatalf("failed to decode config: %v", err)
+		}
+
+		if cfg["ai_provider"] != "cloud" {
+			t.Errorf("expected ai_provider 'cloud', got %v", cfg["ai_provider"])
+		}
+		if cfg["cloud_provider"] != "google" {
+			t.Errorf("expected cloud_provider 'google', got %v", cfg["cloud_provider"])
+		}
+		if cfg["google_model"] != "gemini-2.5-flash" {
+			t.Errorf("expected google_model 'gemini-2.5-flash', got %v", cfg["google_model"])
+		}
+		if cfg["google_api_key"] != "AIzaSyFakeKeyForTest" {
+			t.Errorf("expected google_api_key saved, got %v", cfg["google_api_key"])
+		}
+
+		// Verify GET /api/ollama/status reports Cloud status
+		statusRes, err := client.Get(ts.URL + "/api/ollama/status")
+		if err != nil {
+			t.Fatalf("GET /api/ollama/status failed: %v", err)
+		}
+		defer statusRes.Body.Close()
+
+		var status map[string]any
+		if err := json.NewDecoder(statusRes.Body).Decode(&status); err != nil {
+			t.Fatalf("failed to decode status: %v", err)
+		}
+
+		if status["provider"] != "cloud" {
+			t.Errorf("expected status.provider 'cloud', got %v", status["provider"])
+		}
+		if status["cloud_provider"] != "google" {
+			t.Errorf("expected status.cloud_provider 'google', got %v", status["cloud_provider"])
+		}
+		if status["model"] != "gemini-2.5-flash" {
+			t.Errorf("expected status.model 'gemini-2.5-flash', got %v", status["model"])
+		}
+		// Since a fake key was provided, online should be false and modelError present
+		if status["online"] == true {
+			t.Errorf("expected status.online false for fake key, got %v", status["online"])
+		}
+	})
+
+	// 10. POST /api/ai/test with mock servers for all 4 providers
+	t.Run("POST /api/ai/test mock live servers", func(t *testing.T) {
+		// Mock Google
+		mockGoogle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"pong"}]}}]}`))
+		}))
+		defer mockGoogle.Close()
+
+		// Mock Claude
+		mockClaude := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"content":[{"type":"text","text":"pong"}]}`))
+		}))
+		defer mockClaude.Close()
+
+		// Mock DeepSeek
+		mockDeepSeek := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
+		}))
+		defer mockDeepSeek.Close()
+
+		// Mock OpenAI
+		mockOpenAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"choices":[{"message":{"content":"pong"}}]}`))
+		}))
+		defer mockOpenAI.Close()
+
+		tests := []struct {
+			provider string
+			baseURL  string
+			model    string
+		}{
+			{"google", mockGoogle.URL, "gemini-2.5-flash"},
+			{"claude", mockClaude.URL, "claude-3-7-sonnet-20250219"},
+			{"deepseek", mockDeepSeek.URL, "deepseek-chat"},
+			{"openai", mockOpenAI.URL, "gpt-4o-mini"},
+		}
+
+		for _, tc := range tests {
+			payload := map[string]string{
+				"provider": tc.provider,
+				"api_key":  "test-api-key",
+				"model":    tc.model,
+				"base_url": tc.baseURL,
+			}
+			data, _ := json.Marshal(payload)
+			res, err := client.Post(ts.URL+"/api/ai/test", "application/json", strings.NewReader(string(data)))
+			if err != nil {
+				t.Fatalf("%s POST /api/ai/test failed: %v", tc.provider, err)
+			}
+			if res.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(res.Body)
+				res.Body.Close()
+				t.Fatalf("expected 200 OK for %s, got %d: %s", tc.provider, res.StatusCode, string(body))
+			}
+			var result map[string]any
+			if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+				res.Body.Close()
+				t.Fatalf("failed to decode response for %s: %v", tc.provider, err)
+			}
+			res.Body.Close()
+			if result["ok"] != true {
+				t.Errorf("expected ok: true for %s, got %v (error: %v)", tc.provider, result["ok"], result["error"])
+			}
+		}
+	})
 }
