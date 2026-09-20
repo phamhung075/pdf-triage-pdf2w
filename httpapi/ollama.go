@@ -54,7 +54,7 @@ func (s *server) ollamaStatusHandler(w http.ResponseWriter, r *http.Request) {
 		case "google":
 			cloudModel = cfg.GoogleModel
 			if cloudModel == "" {
-				cloudModel = "gemini-2.5-flash"
+				cloudModel = "gemini-3.8-flash"
 			}
 		case "claude":
 			cloudModel = cfg.AnthropicModel
@@ -64,7 +64,7 @@ func (s *server) ollamaStatusHandler(w http.ResponseWriter, r *http.Request) {
 		case "deepseek":
 			cloudModel = cfg.DeepSeekModel
 			if cloudModel == "" {
-				cloudModel = "deepseek-chat"
+				cloudModel = "deepseek-flash"
 			}
 		case "openai":
 			cloudModel = cfg.OpenAIModel
@@ -73,7 +73,7 @@ func (s *server) ollamaStatusHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		health := s.deps.Ollama.CheckModelCanGenerate(cloudModel, false)
+		health := s.deps.Ollama.CheckModelCanGenerate(cloudModel, r.URL.Query().Get("refresh") == "1")
 		resp := map[string]any{
 			"online":           health.OK,
 			"provider":         "cloud",
@@ -84,9 +84,25 @@ func (s *server) ollamaStatusHandler(w http.ResponseWriter, r *http.Request) {
 			"models":           []string{cloudModel},
 			"modelExists":      true,
 			"modelCanGenerate": health.OK,
+			// model_confirmed is the model id the provider's own response echoed, or "" when the
+			// provider omitted it. It is NEVER copied from configuration; model_verified compares the
+			// requested model against that echo (a missing echo is never verified).
+			"model_confirmed": health.ServedModel,
+			"model_verified":  aiprovider.ModelMatches(cloudModel, health.ServedModel),
 		}
 		if !health.OK {
 			resp["modelError"] = health.Error
+		}
+		// The last-classification keys are omitted until a classification has succeeded since start
+		// or since the last config change. The real *aiprovider.Manager implements this optional
+		// interface; the OllamaClient deps interface is intentionally not grown (test fakes).
+		if lc, ok := s.deps.Ollama.(interface {
+			LastClassification() (string, time.Time)
+		}); ok {
+			if lastModel, at := lc.LastClassification(); lastModel != "" && !at.IsZero() {
+				resp["last_classification_model"] = lastModel
+				resp["last_classification_at"] = at.UTC().Format(time.RFC3339)
+			}
 		}
 		writeJSON(w, 200, resp)
 		return
@@ -258,7 +274,14 @@ func (s *server) aiTestHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, map[string]any{"ok": false, "error": health.Error, "latency_ms": latency})
 			return
 		}
-		writeJSON(w, 200, map[string]any{"ok": true, "message": "Ollama is online and model " + model + " can generate", "latency_ms": latency})
+		writeJSON(w, 200, map[string]any{
+			"ok":              true,
+			"message":         "Ollama is online and model " + model + " can generate",
+			"latency_ms":      latency,
+			"model_requested": model,
+			"model_confirmed": health.ServedModel,
+			"model_verified":  aiprovider.ModelMatches(model, health.ServedModel),
+		})
 		return
 	default:
 		writeError(w, 400, "unknown AI provider: "+providerName)
@@ -266,7 +289,17 @@ func (s *server) aiTestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	res, err := prov.Test(ctx)
+	// Prefer the optional prober so the response carries the model id the provider echoed. Tests and
+	// third-party Providers that only implement Provider fall back to Test with an unknown echo.
+	var res, servedModel string
+	var err error
+	if prober, ok := prov.(interface {
+		TestWithModel(context.Context) (string, string, error)
+	}); ok {
+		res, servedModel, err = prober.TestWithModel(ctx)
+	} else {
+		res, err = prov.Test(ctx)
+	}
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, 200, map[string]any{
@@ -278,8 +311,11 @@ func (s *server) aiTestHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]any{
-		"ok":         true,
-		"message":    fmt.Sprintf("Successfully connected to %s! Test response: %s", prov.Name(), strings.TrimSpace(res)),
-		"latency_ms": latency,
+		"ok":              true,
+		"message":         fmt.Sprintf("Successfully connected to %s! Test response: %s", prov.Name(), strings.TrimSpace(res)),
+		"latency_ms":      latency,
+		"model_requested": model,
+		"model_confirmed": servedModel,
+		"model_verified":  aiprovider.ModelMatches(model, servedModel),
 	})
 }

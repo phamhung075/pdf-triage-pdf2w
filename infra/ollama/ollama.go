@@ -221,22 +221,30 @@ func (c *Client) baseURL() string {
 }
 
 // ModelHealth mirrors the TS “{ ok: boolean; error?: string }“ return of checkModelCanGenerate.
+// ServedModel carries the model id a cloud provider echoed in its own response, and is empty for the
+// local Ollama client (which never passes one through) or when the provider omitted the echo. It is
+// never filled from configuration.
 type ModelHealth struct {
-	OK    bool
-	Error string
+	OK          bool
+	Error       string
+	ServedModel string
 }
 
-// Completion mirrors the TS “{ response: string; thinking?: string }“.
+// Completion mirrors the TS “{ response: string; thinking?: string }“. Model is the model id the
+// upstream response echoed; it is empty for local Ollama and for providers that omit the echo.
 type Completion struct {
 	Response string
 	Thinking string
+	Model    string
 }
 
 // TextCompletion mirrors the TS “{ response: string; thinking?: string; doneReason?: string }“.
+// Model is the model id the upstream response echoed; empty for local Ollama.
 type TextCompletion struct {
 	Response   string
 	Thinking   string
 	DoneReason string
+	Model      string
 }
 
 type modelHealthCacheEntry struct {

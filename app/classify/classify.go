@@ -195,13 +195,13 @@ func (d Deps) aiInfo() (moduleTag, providerName, modelName string) {
 		if model == "" {
 			switch canonical {
 			case "deepseek":
-				model = "deepseek-chat"
+				model = "deepseek-flash"
 			case "claude":
 				model = "claude-3-7-sonnet-20250219"
 			case "openai":
 				model = "gpt-4o-mini"
 			default:
-				model = "gemini-2.5-flash"
+				model = "gemini-3.8-flash"
 			}
 		}
 		switch canonical {

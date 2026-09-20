@@ -15,7 +15,7 @@ import (
 )
 
 const defaultDeepSeekBaseURL = "https://api.deepseek.com"
-const defaultDeepSeekModel = "deepseek-chat"
+const defaultDeepSeekModel = "deepseek-flash"
 
 // DeepSeekConfig holds settings for the DeepSeek API client.
 type DeepSeekConfig struct {
@@ -77,6 +77,7 @@ type deepSeekRequest struct {
 }
 
 type deepSeekResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Role             string `json:"role"`
@@ -115,11 +116,11 @@ func (d *DeepSeekProvider) RequestClassification(ctx context.Context, system, us
 		ResponseFormat: &deepSeekResponseFormat{Type: "json_object"},
 	}
 
-	content, thinking, _, err := d.post(ctx, reqBody)
+	content, thinking, _, servedModel, err := d.post(ctx, reqBody)
 	if err != nil {
 		return ollama.Completion{}, err
 	}
-	return ollama.Completion{Response: content, Thinking: thinking}, nil
+	return ollama.Completion{Response: content, Thinking: thinking, Model: servedModel}, nil
 }
 
 func (d *DeepSeekProvider) RequestTextChat(ctx context.Context, system, user string) (ollama.TextCompletion, error) {
@@ -137,16 +138,18 @@ func (d *DeepSeekProvider) RequestTextChat(ctx context.Context, system, user str
 		Temperature: &temp,
 	}
 
-	content, thinking, finishReason, err := d.post(ctx, reqBody)
+	content, thinking, finishReason, servedModel, err := d.post(ctx, reqBody)
 	if err != nil {
 		return ollama.TextCompletion{}, err
 	}
-	return ollama.TextCompletion{Response: content, Thinking: thinking, DoneReason: finishReason}, nil
+	return ollama.TextCompletion{Response: content, Thinking: thinking, DoneReason: finishReason, Model: servedModel}, nil
 }
 
-func (d *DeepSeekProvider) Test(ctx context.Context) (string, error) {
+// TestWithModel runs the connection test and returns the model id the upstream response echoed, or
+// "" when the provider omitted it. It never copies the configured model into the result.
+func (d *DeepSeekProvider) TestWithModel(ctx context.Context) (string, string, error) {
 	if d.apiKey == "" {
-		return "", errors.New("DeepSeek API key is empty")
+		return "", "", errors.New("DeepSeek API key is empty")
 	}
 	maxTokens := 10
 	reqBody := deepSeekRequest{
@@ -156,50 +159,55 @@ func (d *DeepSeekProvider) Test(ctx context.Context) (string, error) {
 		},
 		MaxTokens: &maxTokens,
 	}
-	content, _, _, err := d.post(ctx, reqBody)
-	return content, err
+	content, _, _, servedModel, err := d.post(ctx, reqBody)
+	return content, servedModel, err
 }
 
-func (d *DeepSeekProvider) post(ctx context.Context, payload deepSeekRequest) (string, string, string, error) {
+func (d *DeepSeekProvider) Test(ctx context.Context) (string, error) {
+	reply, _, err := d.TestWithModel(ctx)
+	return reply, err
+}
+
+func (d *DeepSeekProvider) post(ctx context.Context, payload deepSeekRequest) (string, string, string, string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", "", "", fmt.Errorf("marshal request: %w", err)
+		return "", "", "", "", fmt.Errorf("marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, d.endpointURL(), bytes.NewReader(raw))
 	if err != nil {
-		return "", "", "", fmt.Errorf("build request: %w", err)
+		return "", "", "", "", fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+d.apiKey)
 
 	resp, err := d.http.Do(httpReq)
 	if err != nil {
-		return "", "", "", fmt.Errorf("DeepSeek API request failed: %w", err)
+		return "", "", "", "", fmt.Errorf("DeepSeek API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", "", fmt.Errorf("read response body: %w", err)
+		return "", "", "", "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var dResp deepSeekResponse
 	if err := json.Unmarshal(bodyBytes, &dResp); err != nil {
-		return "", "", "", fmt.Errorf("parse DeepSeek API response (status %d): %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", "", fmt.Errorf("parse DeepSeek API response (status %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if dResp.Error != nil {
-		return "", "", "", fmt.Errorf("DeepSeek API error: %s", dResp.Error.Message)
+		return "", "", "", "", fmt.Errorf("DeepSeek API error: %s", dResp.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", "", fmt.Errorf("DeepSeek API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", "", fmt.Errorf("DeepSeek API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if len(dResp.Choices) == 0 {
-		return "", "", "", errors.New("DeepSeek API returned no choices")
+		return "", "", "", "", errors.New("DeepSeek API returned no choices")
 	}
 
 	choice := dResp.Choices[0]
-	return choice.Message.Content, choice.Message.ReasoningContent, choice.FinishReason, nil
+	return choice.Message.Content, choice.Message.ReasoningContent, choice.FinishReason, dResp.Model, nil
 }

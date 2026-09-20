@@ -15,7 +15,7 @@ import (
 )
 
 const defaultGoogleBaseURL = "https://generativelanguage.googleapis.com"
-const defaultGoogleModel = "gemini-2.5-flash"
+const defaultGoogleModel = "gemini-3.8-flash"
 
 // GoogleConfig holds settings for the Google Gemini API client.
 type GoogleConfig struct {
@@ -81,7 +81,8 @@ type geminiRequest struct {
 }
 
 type geminiResponse struct {
-	Candidates []struct {
+	ModelVersion string `json:"modelVersion"`
+	Candidates   []struct {
 		Content struct {
 			Parts []struct {
 				Text string `json:"text"`
@@ -147,11 +148,11 @@ func (g *GoogleProvider) RequestClassification(ctx context.Context, system, user
 		}
 	}
 
-	text, err := g.post(ctx, reqBody)
+	text, servedModel, err := g.post(ctx, reqBody)
 	if err != nil {
 		return ollama.Completion{}, err
 	}
-	return ollama.Completion{Response: text}, nil
+	return ollama.Completion{Response: text, Model: servedModel}, nil
 }
 
 func (g *GoogleProvider) RequestTextChat(ctx context.Context, system, user string) (ollama.TextCompletion, error) {
@@ -174,16 +175,18 @@ func (g *GoogleProvider) RequestTextChat(ctx context.Context, system, user strin
 		}
 	}
 
-	text, err := g.post(ctx, reqBody)
+	text, servedModel, err := g.post(ctx, reqBody)
 	if err != nil {
 		return ollama.TextCompletion{}, err
 	}
-	return ollama.TextCompletion{Response: text, DoneReason: "stop"}, nil
+	return ollama.TextCompletion{Response: text, DoneReason: "stop", Model: servedModel}, nil
 }
 
-func (g *GoogleProvider) Test(ctx context.Context) (string, error) {
+// TestWithModel runs the connection test and returns the modelVersion the upstream response echoed,
+// or "" when Gemini omitted it. It never copies the configured model into the result.
+func (g *GoogleProvider) TestWithModel(ctx context.Context) (string, string, error) {
 	if g.apiKey == "" {
-		return "", errors.New("Google API key is empty")
+		return "", "", errors.New("Google API key is empty")
 	}
 	maxTokens := 10
 	reqBody := geminiRequest{
@@ -197,49 +200,54 @@ func (g *GoogleProvider) Test(ctx context.Context) (string, error) {
 	return g.post(ctx, reqBody)
 }
 
-func (g *GoogleProvider) post(ctx context.Context, payload geminiRequest) (string, error) {
+func (g *GoogleProvider) Test(ctx context.Context) (string, error) {
+	reply, _, err := g.TestWithModel(ctx)
+	return reply, err
+}
+
+func (g *GoogleProvider) post(ctx context.Context, payload geminiRequest) (string, string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", "", fmt.Errorf("marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpointURL(), bytes.NewReader(raw))
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
+		return "", "", fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", g.apiKey)
 
 	resp, err := g.http.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("Google API request failed: %w", redactedTransportError{err: err, secret: g.apiKey})
+		return "", "", fmt.Errorf("Google API request failed: %w", redactedTransportError{err: err, secret: g.apiKey})
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read response body: %w", err)
+		return "", "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var gResp geminiResponse
 	if err := json.Unmarshal(bodyBytes, &gResp); err != nil {
-		return "", fmt.Errorf("parse Google API response (status %d): %s", resp.StatusCode, g.redact(string(bodyBytes)))
+		return "", "", fmt.Errorf("parse Google API response (status %d): %s", resp.StatusCode, g.redact(string(bodyBytes)))
 	}
 
 	if gResp.Error != nil {
-		return "", fmt.Errorf("Google API error (%d %s): %s", gResp.Error.Code, gResp.Error.Status, g.redact(gResp.Error.Message))
+		return "", "", fmt.Errorf("Google API error (%d %s): %s", gResp.Error.Code, gResp.Error.Status, g.redact(gResp.Error.Message))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Google API HTTP %d: %s", resp.StatusCode, g.redact(string(bodyBytes)))
+		return "", "", fmt.Errorf("Google API HTTP %d: %s", resp.StatusCode, g.redact(string(bodyBytes)))
 	}
 
 	if len(gResp.Candidates) == 0 || len(gResp.Candidates[0].Content.Parts) == 0 {
-		return "", errors.New("Google API returned empty candidates")
+		return "", "", errors.New("Google API returned empty candidates")
 	}
 
 	var sb strings.Builder
 	for _, p := range gResp.Candidates[0].Content.Parts {
 		sb.WriteString(p.Text)
 	}
-	return sb.String(), nil
+	return sb.String(), gResp.ModelVersion, nil
 }

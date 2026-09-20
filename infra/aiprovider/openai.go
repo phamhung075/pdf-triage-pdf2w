@@ -78,6 +78,7 @@ type openAIRequest struct {
 }
 
 type openAIResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
 			Role    string `json:"role"`
@@ -128,11 +129,11 @@ func (o *OpenAIProvider) RequestClassification(ctx context.Context, system, user
 		reqBody.Temperature = &temp
 	}
 
-	text, _, err := o.post(ctx, reqBody)
+	text, _, servedModel, err := o.post(ctx, reqBody)
 	if err != nil {
 		return ollama.Completion{}, err
 	}
-	return ollama.Completion{Response: text}, nil
+	return ollama.Completion{Response: text, Model: servedModel}, nil
 }
 
 func (o *OpenAIProvider) RequestTextChat(ctx context.Context, system, user string) (ollama.TextCompletion, error) {
@@ -152,16 +153,18 @@ func (o *OpenAIProvider) RequestTextChat(ctx context.Context, system, user strin
 		reqBody.Temperature = &temp
 	}
 
-	text, finishReason, err := o.post(ctx, reqBody)
+	text, finishReason, servedModel, err := o.post(ctx, reqBody)
 	if err != nil {
 		return ollama.TextCompletion{}, err
 	}
-	return ollama.TextCompletion{Response: text, DoneReason: finishReason}, nil
+	return ollama.TextCompletion{Response: text, DoneReason: finishReason, Model: servedModel}, nil
 }
 
-func (o *OpenAIProvider) Test(ctx context.Context) (string, error) {
+// TestWithModel runs the connection test and returns the model id the response echoed, or "" when
+// OpenAI omitted it. It never copies the configured model into the result.
+func (o *OpenAIProvider) TestWithModel(ctx context.Context) (string, string, error) {
 	if o.apiKey == "" {
-		return "", errors.New("OpenAI API key is empty")
+		return "", "", errors.New("OpenAI API key is empty")
 	}
 	maxTokens := 10
 	reqBody := openAIRequest{
@@ -175,49 +178,54 @@ func (o *OpenAIProvider) Test(ctx context.Context) (string, error) {
 	} else {
 		reqBody.MaxTokens = &maxTokens
 	}
-	text, _, err := o.post(ctx, reqBody)
-	return text, err
+	text, _, servedModel, err := o.post(ctx, reqBody)
+	return text, servedModel, err
 }
 
-func (o *OpenAIProvider) post(ctx context.Context, payload openAIRequest) (string, string, error) {
+func (o *OpenAIProvider) Test(ctx context.Context) (string, error) {
+	reply, _, err := o.TestWithModel(ctx)
+	return reply, err
+}
+
+func (o *OpenAIProvider) post(ctx context.Context, payload openAIRequest) (string, string, string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", "", fmt.Errorf("marshal request: %w", err)
+		return "", "", "", fmt.Errorf("marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.endpointURL(), bytes.NewReader(raw))
 	if err != nil {
-		return "", "", fmt.Errorf("build request: %w", err)
+		return "", "", "", fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
 
 	resp, err := o.http.Do(httpReq)
 	if err != nil {
-		return "", "", fmt.Errorf("OpenAI API request failed: %w", err)
+		return "", "", "", fmt.Errorf("OpenAI API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", fmt.Errorf("read response body: %w", err)
+		return "", "", "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var oResp openAIResponse
 	if err := json.Unmarshal(bodyBytes, &oResp); err != nil {
-		return "", "", fmt.Errorf("parse OpenAI API response (status %d): %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", fmt.Errorf("parse OpenAI API response (status %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if oResp.Error != nil {
-		return "", "", fmt.Errorf("OpenAI API error (%s): %s", oResp.Error.Type, oResp.Error.Message)
+		return "", "", "", fmt.Errorf("OpenAI API error (%s): %s", oResp.Error.Type, oResp.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("OpenAI API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", fmt.Errorf("OpenAI API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if len(oResp.Choices) == 0 {
-		return "", "", errors.New("OpenAI API returned no choices")
+		return "", "", "", errors.New("OpenAI API returned no choices")
 	}
 
-	return oResp.Choices[0].Message.Content, oResp.Choices[0].FinishReason, nil
+	return oResp.Choices[0].Message.Content, oResp.Choices[0].FinishReason, oResp.Model, nil
 }

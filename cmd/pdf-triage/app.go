@@ -241,12 +241,12 @@ func newApplication(opts appOptions) (*application, error) {
 			if c.DeepSeekModel != "" {
 				return c.DeepSeekModel
 			}
-			return "deepseek-chat"
+			return "deepseek-flash"
 		case "google":
 			if c.GoogleModel != "" {
 				return c.GoogleModel
 			}
-			return "gemini-2.5-flash"
+			return "gemini-3.8-flash"
 		case "claude":
 			if c.AnthropicModel != "" {
 				return c.AnthropicModel

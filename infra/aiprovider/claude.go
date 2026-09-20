@@ -73,6 +73,7 @@ type claudeRequest struct {
 }
 
 type claudeResponse struct {
+	Model   string `json:"model"`
 	Content []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -104,11 +105,11 @@ func (c *ClaudeProvider) RequestClassification(ctx context.Context, system, user
 		},
 	}
 
-	text, _, err := c.post(ctx, reqBody)
+	text, _, servedModel, err := c.post(ctx, reqBody)
 	if err != nil {
 		return ollama.Completion{}, err
 	}
-	return ollama.Completion{Response: text}, nil
+	return ollama.Completion{Response: text, Model: servedModel}, nil
 }
 
 func (c *ClaudeProvider) RequestTextChat(ctx context.Context, system, user string) (ollama.TextCompletion, error) {
@@ -127,16 +128,18 @@ func (c *ClaudeProvider) RequestTextChat(ctx context.Context, system, user strin
 		},
 	}
 
-	text, stopReason, err := c.post(ctx, reqBody)
+	text, stopReason, servedModel, err := c.post(ctx, reqBody)
 	if err != nil {
 		return ollama.TextCompletion{}, err
 	}
-	return ollama.TextCompletion{Response: text, DoneReason: stopReason}, nil
+	return ollama.TextCompletion{Response: text, DoneReason: stopReason, Model: servedModel}, nil
 }
 
-func (c *ClaudeProvider) Test(ctx context.Context) (string, error) {
+// TestWithModel runs the connection test and returns the model id the response echoed, or "" when
+// Anthropic omitted it. It never copies the configured model into the result.
+func (c *ClaudeProvider) TestWithModel(ctx context.Context) (string, string, error) {
 	if c.apiKey == "" {
-		return "", errors.New("Anthropic API key is empty")
+		return "", "", errors.New("Anthropic API key is empty")
 	}
 	reqBody := claudeRequest{
 		Model:     c.model,
@@ -145,19 +148,24 @@ func (c *ClaudeProvider) Test(ctx context.Context) (string, error) {
 			{Role: "user", Content: "Ping. Reply with 'OK'."},
 		},
 	}
-	text, _, err := c.post(ctx, reqBody)
-	return text, err
+	text, _, servedModel, err := c.post(ctx, reqBody)
+	return text, servedModel, err
 }
 
-func (c *ClaudeProvider) post(ctx context.Context, payload claudeRequest) (string, string, error) {
+func (c *ClaudeProvider) Test(ctx context.Context) (string, error) {
+	reply, _, err := c.TestWithModel(ctx)
+	return reply, err
+}
+
+func (c *ClaudeProvider) post(ctx context.Context, payload claudeRequest) (string, string, string, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return "", "", fmt.Errorf("marshal request: %w", err)
+		return "", "", "", fmt.Errorf("marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpointURL(), bytes.NewReader(raw))
 	if err != nil {
-		return "", "", fmt.Errorf("build request: %w", err)
+		return "", "", "", fmt.Errorf("build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
@@ -165,25 +173,25 @@ func (c *ClaudeProvider) post(ctx context.Context, payload claudeRequest) (strin
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return "", "", fmt.Errorf("Claude API request failed: %w", err)
+		return "", "", "", fmt.Errorf("Claude API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", fmt.Errorf("read response body: %w", err)
+		return "", "", "", fmt.Errorf("read response body: %w", err)
 	}
 
 	var cResp claudeResponse
 	if err := json.Unmarshal(bodyBytes, &cResp); err != nil {
-		return "", "", fmt.Errorf("parse Claude API response (status %d): %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", fmt.Errorf("parse Claude API response (status %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	if cResp.Error != nil {
-		return "", "", fmt.Errorf("Claude API error (%s): %s", cResp.Error.Type, cResp.Error.Message)
+		return "", "", "", fmt.Errorf("Claude API error (%s): %s", cResp.Error.Type, cResp.Error.Message)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("Claude API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+		return "", "", "", fmt.Errorf("Claude API HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var sb strings.Builder
@@ -192,5 +200,5 @@ func (c *ClaudeProvider) post(ctx context.Context, payload claudeRequest) (strin
 			sb.WriteString(block.Text)
 		}
 	}
-	return sb.String(), cResp.StopReason, nil
+	return sb.String(), cResp.StopReason, cResp.Model, nil
 }

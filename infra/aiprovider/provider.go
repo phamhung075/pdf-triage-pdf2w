@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,10 +19,13 @@ import (
 const cloudHealthCacheTTL = 60 * time.Second
 
 // cloudHealthEntry is one cached cloud health result: the ok flag plus the exact error text that was
-// reported (so a cached failure still carries its message).
+// reported (so a cached failure still carries its message). servedModel is the model id the upstream
+// response echoed on a successful probe, or "" when the provider omitted it; it is never copied from
+// configuration.
 type cloudHealthEntry struct {
-	ok      bool
-	errText string
+	ok          bool
+	errText     string
+	servedModel string
 }
 
 // ProviderType represents whether AI runs locally or in the cloud.
@@ -69,6 +73,48 @@ type Provider interface {
 	RequestClassification(ctx context.Context, system, user string) (ollama.Completion, error)
 	RequestTextChat(ctx context.Context, system, user string) (ollama.TextCompletion, error)
 	Test(ctx context.Context) (string, error)
+}
+
+// modelProber is the OPTIONAL extension of Provider that returns the model id the upstream response
+// echoed alongside the connection-test reply. Every cloud provider implements it; the Provider
+// interface itself is intentionally not grown, because test fakes and other callers only need Test.
+// The returned servedModel is "" when the provider omitted the echo — it is never read from config.
+type modelProber interface {
+	TestWithModel(ctx context.Context) (reply, servedModel string, err error)
+}
+
+// modelBuildSuffix matches the only provider suffixes ModelMatches tolerates after "-": a dated build
+// (e.g. "2024-08-06"), a numeric build (e.g. "001" or "20250219") or "latest". Any other suffix
+// ("-mini", "-lite", "-pro", "-preview"...) names a DIFFERENT model. Compiled once at package level.
+var modelBuildSuffix = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}|\d{3,8}|latest)$`)
+
+// ModelMatches reports whether a model id confirmed by the upstream API is the requested model,
+// tolerating only provider build suffixes. Comparison trims surrounding whitespace and is
+// case-insensitive. An exact match is true, and so is a confirmed id that starts with the requested
+// id followed by ":" (a tag, e.g. "qwen3.5" -> "qwen3.5:9b") or by a "-" whose remainder is a build
+// suffix modelBuildSuffix accepts (e.g. "gpt-4o" -> "gpt-4o-2024-08-06", "claude-3-7-sonnet" ->
+// "claude-3-7-sonnet-20250219", "gemini-2.5-flash" -> "gemini-2.5-flash-001"). A "-" suffix such as
+// "-mini" or "-lite" names a different model and returns false. A confirmed id of "" is never a
+// match, so a missing echo is never treated as verified.
+func ModelMatches(requested, confirmed string) bool {
+	req := strings.ToLower(strings.TrimSpace(requested))
+	conf := strings.ToLower(strings.TrimSpace(confirmed))
+	if conf == "" {
+		return false
+	}
+	if req == "" {
+		return false
+	}
+	if req == conf {
+		return true
+	}
+	if strings.HasPrefix(conf, req+":") {
+		return true
+	}
+	if strings.HasPrefix(conf, req+"-") {
+		return modelBuildSuffix.MatchString(strings.TrimPrefix(conf, req+"-"))
+	}
+	return false
 }
 
 // Config holds the full AI provider configuration.
@@ -123,6 +169,12 @@ type Manager struct {
 	health     cloudHealthEntry
 	// now is the clock seam: time.Now in production, replaced by tests with a fake clock.
 	now func() time.Time
+
+	// lastMu guards the "last successful classification" record below. It is deliberately separate
+	// from mu so a classification in flight never blocks a config read or vice versa.
+	lastMu    sync.Mutex
+	lastModel string
+	lastAt    time.Time
 }
 
 // NewManager creates an AI Provider Manager.
@@ -170,6 +222,38 @@ func (m *Manager) UpdateConfig(cfg Config) {
 	if m.ollama != nil {
 		m.ollama = m.ollama.WithHostModel(cfg.OllamaHost, cfg.OllamaModel)
 	}
+	// Every config update resets the record: UpdateConfig cannot tell which field changed, so the
+	// previous classification's model id can no longer be assumed to describe what the running
+	// configuration will serve.
+	m.lastMu.Lock()
+	m.lastModel = ""
+	m.lastAt = time.Time{}
+	m.lastMu.Unlock()
+}
+
+// LastClassification returns the model id echoed by the most recent successful
+// RequestClassificationCompletion, plus when it happened. Both are zero until a classification has
+// succeeded since start or since the last UpdateConfig. Chat calls are never recorded here.
+func (m *Manager) LastClassification() (string, time.Time) {
+	m.lastMu.Lock()
+	defer m.lastMu.Unlock()
+	return m.lastModel, m.lastAt
+}
+
+// recordClassification stores a non-empty echoed model id. The caller has already filtered empty ids.
+func (m *Manager) recordClassification(model string) {
+	m.lastMu.Lock()
+	m.lastModel = strings.TrimSpace(model)
+	m.lastAt = m.currentTime()
+	m.lastMu.Unlock()
+}
+
+// currentTime reads the clock seam, falling back to time.Now when it is unset.
+func (m *Manager) currentTime() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
 }
 
 // ActiveProvider returns the current active provider instance. The second value is a display name
@@ -260,10 +344,18 @@ func (m *Manager) RequestClassificationCompletion(system, user string) (ollama.C
 	if provider != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		return provider.RequestClassification(ctx, system, user)
+		comp, err := provider.RequestClassification(ctx, system, user)
+		if err == nil && strings.TrimSpace(comp.Model) != "" {
+			m.recordClassification(comp.Model)
+		}
+		return comp, err
 	}
 	if client := m.ollamaClient(); client != nil {
-		return client.RequestClassificationCompletion(system, user)
+		comp, err := client.RequestClassificationCompletion(system, user)
+		if err == nil && strings.TrimSpace(comp.Model) != "" {
+			m.recordClassification(comp.Model)
+		}
+		return comp, err
 	}
 	return ollama.Completion{}, errors.New("no AI provider configured")
 }
@@ -329,11 +421,17 @@ func (m *Manager) checkCloudHealth(provider Provider, name, modelName string, fo
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, testErr := provider.Test(ctx)
+	var servedModel string
+	var testErr error
+	if prober, ok := provider.(modelProber); ok {
+		_, servedModel, testErr = prober.TestWithModel(ctx)
+	} else {
+		_, testErr = provider.Test(ctx)
+	}
 	if testErr != nil {
 		m.health = cloudHealthEntry{ok: false, errText: fmt.Sprintf("%s error: %v", name, testErr)}
 	} else {
-		m.health = cloudHealthEntry{ok: true}
+		m.health = cloudHealthEntry{ok: true, servedModel: servedModel}
 	}
 	m.healthInit = true
 	m.healthKey = key
@@ -341,10 +439,11 @@ func (m *Manager) checkCloudHealth(provider Provider, name, modelName string, fo
 	return m.cloudHealthResult()
 }
 
-// cloudHealthResult is the ModelHealth for the cached entry. The caller holds healthMu.
+// cloudHealthResult is the ModelHealth for the cached entry. The caller holds healthMu. ServedModel
+// is the id the upstream echoed on success and stays "" when the provider omitted it.
 func (m *Manager) cloudHealthResult() ollama.ModelHealth {
 	if m.health.ok {
-		return ollama.ModelHealth{OK: true}
+		return ollama.ModelHealth{OK: true, ServedModel: m.health.servedModel}
 	}
 	return ollama.ModelHealth{OK: false, Error: m.health.errText}
 }
@@ -394,11 +493,11 @@ func (m *Manager) ListModels(host string) ([]string, error) {
 		}
 		switch canonical {
 		case "google":
-			return []string{"gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"}, nil
+			return []string{"gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"}, nil
 		case "claude":
 			return []string{"claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"}, nil
 		case "deepseek":
-			return []string{"deepseek-chat", "deepseek-reasoner"}, nil
+			return []string{"deepseek-flash", "deepseek-chat", "deepseek-reasoner"}, nil
 		case "openai":
 			return []string{"gpt-4o-mini", "gpt-4o", "o3-mini", "gpt-4.5-preview"}, nil
 		}
