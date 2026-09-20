@@ -2,6 +2,7 @@ package aiprovider
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,18 @@ import (
 
 	"github.com/phamhung075/pdf-triage-pdf2w/infra/ollama"
 )
+
+// cloudHealthCacheTTL is how long a cloud health check is cached. CheckModelCanGenerate runs a real,
+// billable provider call and the dashboard polls GET /api/ollama/status every 10 s per open tab, so
+// without this cache every poll billed a provider call.
+const cloudHealthCacheTTL = 60 * time.Second
+
+// cloudHealthEntry is one cached cloud health result: the ok flag plus the exact error text that was
+// reported (so a cached failure still carries its message).
+type cloudHealthEntry struct {
+	ok      bool
+	errText string
+}
 
 // ProviderType represents whether AI runs locally or in the cloud.
 type ProviderType string
@@ -99,6 +112,17 @@ type Manager struct {
 	claude   Provider
 	deepseek Provider
 	openai   Provider
+
+	// healthMu guards the cloud health cache below. It is held across the upstream provider call so
+	// concurrent callers on a cache miss trigger exactly one (billable) call, like the stats cache
+	// in httpapi/system.go.
+	healthMu   sync.Mutex
+	healthInit bool
+	healthKey  string
+	healthAt   time.Time
+	health     cloudHealthEntry
+	// now is the clock seam: time.Now in production, replaced by tests with a fake clock.
+	now func() time.Time
 }
 
 // NewManager creates an AI Provider Manager.
@@ -106,6 +130,7 @@ func NewManager(cfg Config, ollamaClient *ollama.Client) *Manager {
 	m := &Manager{
 		cfg:    cfg,
 		ollama: ollamaClient,
+		now:    time.Now,
 	}
 	m.rebuildProviders()
 	return m
@@ -275,19 +300,79 @@ func (m *Manager) CheckModelCanGenerate(modelName string, forceRefresh bool) oll
 		return ollama.ModelHealth{OK: false, Error: err.Error()}
 	}
 	if provider != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		resp, testErr := provider.Test(ctx)
-		if testErr != nil {
-			return ollama.ModelHealth{OK: false, Error: fmt.Sprintf("%s error: %v", name, testErr)}
-		}
-		_ = resp
-		return ollama.ModelHealth{OK: true}
+		return m.checkCloudHealth(provider, name, modelName, forceRefresh)
 	}
 	if client := m.ollamaClient(); client != nil {
 		return client.CheckModelCanGenerate(modelName, forceRefresh)
 	}
 	return ollama.ModelHealth{OK: false, Error: "no AI provider"}
+}
+
+// checkCloudHealth runs provider.Test behind the 60 s cloud health cache. The cache key is the
+// active provider + model + base URL + SHA-256 of the API key, so a settings change misses
+// automatically and the key itself is never stored or logged. forceRefresh bypasses the cache and
+// refreshes it; failures are cached for the same TTL. healthMu is held across the upstream call so
+// concurrent callers on a miss trigger a single billable call.
+func (m *Manager) checkCloudHealth(provider Provider, name, modelName string, forceRefresh bool) ollama.ModelHealth {
+	key := m.cloudHealthKey(modelName)
+
+	m.healthMu.Lock()
+	defer m.healthMu.Unlock()
+
+	now := m.now
+	if now == nil {
+		now = time.Now
+	}
+	if !forceRefresh && m.healthInit && m.healthKey == key && now().Sub(m.healthAt) < cloudHealthCacheTTL {
+		return m.cloudHealthResult()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, testErr := provider.Test(ctx)
+	if testErr != nil {
+		m.health = cloudHealthEntry{ok: false, errText: fmt.Sprintf("%s error: %v", name, testErr)}
+	} else {
+		m.health = cloudHealthEntry{ok: true}
+	}
+	m.healthInit = true
+	m.healthKey = key
+	m.healthAt = now()
+	return m.cloudHealthResult()
+}
+
+// cloudHealthResult is the ModelHealth for the cached entry. The caller holds healthMu.
+func (m *Manager) cloudHealthResult() ollama.ModelHealth {
+	if m.health.ok {
+		return ollama.ModelHealth{OK: true}
+	}
+	return ollama.ModelHealth{OK: false, Error: m.health.errText}
+}
+
+// cloudHealthKey fingerprints the active cloud provider's model, base URL and API key. Only the
+// SHA-256 hex digest of the key is kept; the key itself never enters the cache. The caller must not
+// hold m.mu.
+func (m *Manager) cloudHealthKey(modelName string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	canonical, ok := NormalizeCloud(m.cfg.CloudProvider)
+	if !ok {
+		canonical = "google"
+	}
+	var model, baseURL, apiKey string
+	switch canonical {
+	case "claude":
+		model, baseURL, apiKey = m.cfg.AnthropicModel, m.cfg.AnthropicBaseURL, m.cfg.AnthropicAPIKey
+	case "deepseek":
+		model, baseURL, apiKey = m.cfg.DeepSeekModel, m.cfg.DeepSeekBaseURL, m.cfg.DeepSeekAPIKey
+	case "openai":
+		model, baseURL, apiKey = m.cfg.OpenAIModel, m.cfg.OpenAIBaseURL, m.cfg.OpenAIAPIKey
+	default: // "google"
+		model, baseURL, apiKey = m.cfg.GoogleModel, m.cfg.GoogleBaseURL, m.cfg.GoogleAPIKey
+	}
+	sum := sha256.Sum256([]byte(apiKey))
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%x", canonical, model, modelName, baseURL, sum)
 }
 
 // ListModels returns available models for the active provider. For the local provider it delegates

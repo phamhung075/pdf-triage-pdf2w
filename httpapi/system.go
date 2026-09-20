@@ -2,6 +2,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"io/fs"
 	"math"
 	"math/big"
@@ -83,9 +85,18 @@ func (s *server) setupStateHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getConfigHandler ports web-server.ts:314-327.
+// getConfigHandler ports web-server.ts:314-327, changed so API keys never leave the server: the raw
+// *_api_key fields are gone and each provider carries an always-present *_api_key_set boolean.
 func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := s.deps.Settings.Config()
+	writeJSON(w, 200, configResponse(cfg))
+}
+
+// configResponse is the shared GET/PUT /api/config `config` object. It never includes a raw
+// *_api_key value; for each provider it always includes `P_api_key_set` (true iff the stored key is
+// non-empty after trimming), so the dashboard can show whether a key is configured without the key
+// ever reaching the browser.
+func configResponse(cfg settings.Config) map[string]any {
 	resp := map[string]any{
 		"language":               cfg.Language,
 		"input_dir":              cfg.InputDir,
@@ -93,6 +104,10 @@ func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 		"ollama_model":           cfg.OllamaModel,
 		"ollama_host":            cfg.OllamaHost,
 		"personal_name_denylist": cfg.PersonalNameDenylist,
+		"google_api_key_set":     strings.TrimSpace(cfg.GoogleAPIKey) != "",
+		"anthropic_api_key_set":  strings.TrimSpace(cfg.AnthropicAPIKey) != "",
+		"deepseek_api_key_set":   strings.TrimSpace(cfg.DeepSeekAPIKey) != "",
+		"openai_api_key_set":     strings.TrimSpace(cfg.OpenAIAPIKey) != "",
 	}
 	if cfg.AIProvider != "" {
 		resp["ai_provider"] = cfg.AIProvider
@@ -100,17 +115,11 @@ func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if cfg.CloudProvider != "" {
 		resp["cloud_provider"] = cfg.CloudProvider
 	}
-	if cfg.GoogleAPIKey != "" {
-		resp["google_api_key"] = cfg.GoogleAPIKey
-	}
 	if cfg.GoogleModel != "" {
 		resp["google_model"] = cfg.GoogleModel
 	}
 	if cfg.GoogleBaseURL != "" {
 		resp["google_base_url"] = cfg.GoogleBaseURL
-	}
-	if cfg.AnthropicAPIKey != "" {
-		resp["anthropic_api_key"] = cfg.AnthropicAPIKey
 	}
 	if cfg.AnthropicModel != "" {
 		resp["anthropic_model"] = cfg.AnthropicModel
@@ -118,17 +127,11 @@ func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if cfg.AnthropicBaseURL != "" {
 		resp["anthropic_base_url"] = cfg.AnthropicBaseURL
 	}
-	if cfg.DeepSeekAPIKey != "" {
-		resp["deepseek_api_key"] = cfg.DeepSeekAPIKey
-	}
 	if cfg.DeepSeekModel != "" {
 		resp["deepseek_model"] = cfg.DeepSeekModel
 	}
 	if cfg.DeepSeekBaseURL != "" {
 		resp["deepseek_base_url"] = cfg.DeepSeekBaseURL
-	}
-	if cfg.OpenAIAPIKey != "" {
-		resp["openai_api_key"] = cfg.OpenAIAPIKey
 	}
 	if cfg.OpenAIModel != "" {
 		resp["openai_model"] = cfg.OpenAIModel
@@ -136,12 +139,57 @@ func (s *server) getConfigHandler(w http.ResponseWriter, r *http.Request) {
 	if cfg.OpenAIBaseURL != "" {
 		resp["openai_base_url"] = cfg.OpenAIBaseURL
 	}
-	writeJSON(w, 200, resp)
+	return resp
+}
+
+// keepAPIKey maps an incoming *_api_key request field to the settings patch. An omitted or null
+// value (nil pointer), or an empty/whitespace-only value, means "keep the stored key": nil is passed
+// to UpdateSettings so the store leaves the current value untouched. Only a non-empty value replaces
+// it. There is deliberately no way to clear a stored key through the API (documented limitation).
+func keepAPIKey(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+// withoutNullAPIKeys removes a JSON null for any of the four *_api_key fields before schema parsing.
+// SystemSettingsSchema's shared string helper rejects null, but the config contract treats a null
+// key as "keep the stored key", so the field is dropped here and the same "keep" path as an omitted
+// field applies. A body that is empty or not a JSON object is returned unchanged so the schema
+// parser reports its own error.
+func withoutNullAPIKeys(raw []byte) []byte {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return raw
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return raw
+	}
+	changed := false
+	for _, name := range []string{"google_api_key", "anthropic_api_key", "deepseek_api_key", "openai_api_key"} {
+		if v, ok := fields[name]; ok && string(bytes.TrimSpace(v)) == "null" {
+			delete(fields, name)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // putConfigHandler ports web-server.ts:422-440: SystemSettingsSchema.parse then updateConfig.
 func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
-	parsed, err := documentschema.ParseSystemSettings(bodyBytes(r))
+	parsed, err := documentschema.ParseSystemSettings(withoutNullAPIKeys(bodyBytes(r)))
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
@@ -155,16 +203,16 @@ func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
 		OllamaHost:       &parsed.OllamaHost,
 		AIProvider:       parsed.AIProvider,
 		CloudProvider:    parsed.CloudProvider,
-		GoogleAPIKey:     parsed.GoogleAPIKey,
+		GoogleAPIKey:     keepAPIKey(parsed.GoogleAPIKey),
 		GoogleModel:      parsed.GoogleModel,
 		GoogleBaseURL:    parsed.GoogleBaseURL,
-		AnthropicAPIKey:  parsed.AnthropicAPIKey,
+		AnthropicAPIKey:  keepAPIKey(parsed.AnthropicAPIKey),
 		AnthropicModel:   parsed.AnthropicModel,
 		AnthropicBaseURL: parsed.AnthropicBaseURL,
-		DeepSeekAPIKey:   parsed.DeepSeekAPIKey,
+		DeepSeekAPIKey:   keepAPIKey(parsed.DeepSeekAPIKey),
 		DeepSeekModel:    parsed.DeepSeekModel,
 		DeepSeekBaseURL:  parsed.DeepSeekBaseURL,
-		OpenAIAPIKey:     parsed.OpenAIAPIKey,
+		OpenAIAPIKey:     keepAPIKey(parsed.OpenAIAPIKey),
 		OpenAIModel:      parsed.OpenAIModel,
 		OpenAIBaseURL:    parsed.OpenAIBaseURL,
 	}
@@ -185,60 +233,10 @@ func (s *server) putConfigHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cfg := s.deps.Settings.Config()
-	respConfig := map[string]any{
-		"language":               cfg.Language,
-		"input_dir":              cfg.InputDir,
-		"output_root_dir":        cfg.OutputRootDir,
-		"ollama_model":           cfg.OllamaModel,
-		"ollama_host":            cfg.OllamaHost,
-		"personal_name_denylist": cfg.PersonalNameDenylist,
-	}
-	if cfg.AIProvider != "" {
-		respConfig["ai_provider"] = cfg.AIProvider
-	}
-	if cfg.CloudProvider != "" {
-		respConfig["cloud_provider"] = cfg.CloudProvider
-	}
-	if cfg.GoogleAPIKey != "" {
-		respConfig["google_api_key"] = cfg.GoogleAPIKey
-	}
-	if cfg.GoogleModel != "" {
-		respConfig["google_model"] = cfg.GoogleModel
-	}
-	if cfg.GoogleBaseURL != "" {
-		respConfig["google_base_url"] = cfg.GoogleBaseURL
-	}
-	if cfg.AnthropicAPIKey != "" {
-		respConfig["anthropic_api_key"] = cfg.AnthropicAPIKey
-	}
-	if cfg.AnthropicModel != "" {
-		respConfig["anthropic_model"] = cfg.AnthropicModel
-	}
-	if cfg.AnthropicBaseURL != "" {
-		respConfig["anthropic_base_url"] = cfg.AnthropicBaseURL
-	}
-	if cfg.DeepSeekAPIKey != "" {
-		respConfig["deepseek_api_key"] = cfg.DeepSeekAPIKey
-	}
-	if cfg.DeepSeekModel != "" {
-		respConfig["deepseek_model"] = cfg.DeepSeekModel
-	}
-	if cfg.DeepSeekBaseURL != "" {
-		respConfig["deepseek_base_url"] = cfg.DeepSeekBaseURL
-	}
-	if cfg.OpenAIAPIKey != "" {
-		respConfig["openai_api_key"] = cfg.OpenAIAPIKey
-	}
-	if cfg.OpenAIModel != "" {
-		respConfig["openai_model"] = cfg.OpenAIModel
-	}
-	if cfg.OpenAIBaseURL != "" {
-		respConfig["openai_base_url"] = cfg.OpenAIBaseURL
-	}
 
 	writeJSON(w, 200, map[string]any{
 		"message": "System settings updated successfully",
-		"config":  respConfig,
+		"config":  configResponse(cfg),
 	})
 }
 

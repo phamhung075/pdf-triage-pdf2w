@@ -80,6 +80,12 @@ func TestGoldenContract(t *testing.T) {
 				env.settings.cfg.OllamaHost = "http://127.0.0.1:1"
 			},
 			method: http.MethodGet, target: "/api/config",
+			// The captured TS golden predates the api-key-set contract; the new always-present
+			// *_api_key_set booleans are covered by TestConfigNeverReturnsAPIKeys.
+			ignore: map[string]bool{
+				"body.google_api_key_set": true, "body.anthropic_api_key_set": true,
+				"body.deepseek_api_key_set": true, "body.openai_api_key_set": true,
+			},
 		},
 		{
 			name: "get-config-setup-state",
@@ -235,6 +241,11 @@ func TestGoldenContract(t *testing.T) {
 			name:   "put-config",
 			method: http.MethodPut, target: "/api/config",
 			body: map[string]any{"language": "fr", "input_dir": "/tmp/raws", "output_root_dir": "/tmp/archive", "ollama_model": "qwen3.5:9b", "ollama_host": "http://127.0.0.1:11434"},
+			// See the get-config case: the TS golden predates the *_api_key_set contract.
+			ignore: map[string]bool{
+				"body.config.google_api_key_set": true, "body.config.anthropic_api_key_set": true,
+				"body.config.deepseek_api_key_set": true, "body.config.openai_api_key_set": true,
+			},
 		},
 		{
 			name:   "put-config-400",

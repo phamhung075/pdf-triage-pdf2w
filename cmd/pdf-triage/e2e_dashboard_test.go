@@ -239,8 +239,20 @@ func TestE2EDashboardAndAPI(t *testing.T) {
 		if cfg["google_model"] != "gemini-2.5-flash" {
 			t.Errorf("expected google_model 'gemini-2.5-flash', got %v", cfg["google_model"])
 		}
-		if cfg["google_api_key"] != "AIzaSyFakeKeyForTest" {
-			t.Errorf("expected google_api_key saved, got %v", cfg["google_api_key"])
+		// New contract: raw keys never leave the server. The saved fake Google key must show up as
+		// google_api_key_set=true, and none of the four raw *_api_key keys may be present.
+		if cfg["google_api_key_set"] != true {
+			t.Errorf("expected google_api_key_set true after saving a key, got %v", cfg["google_api_key_set"])
+		}
+		for _, key := range []string{"google_api_key", "anthropic_api_key", "deepseek_api_key", "openai_api_key"} {
+			if _, present := cfg[key]; present {
+				t.Errorf("config response leaked %q: %v", key, cfg[key])
+			}
+		}
+		for _, key := range []string{"google_api_key_set", "anthropic_api_key_set", "deepseek_api_key_set", "openai_api_key_set"} {
+			if _, present := cfg[key]; !present {
+				t.Errorf("config response missing %q: %v", key, cfg)
+			}
 		}
 
 		// Verify GET /api/ollama/status reports Cloud status
